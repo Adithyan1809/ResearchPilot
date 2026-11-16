@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResearchLens — AI-Powered Research Paper Analysis</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-brand">
+            <h1 class="header-title">
+                <span class="brand-icon">🔬</span>
+                ResearchLens
+                <span class="version-badge">v1.0</span>
+            </h1>
+            <p class="header-subtitle">AI-Powered Research Paper Analysis</p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main">
+        <!-- Left Panel: Document Management -->
+        <aside class="panel panel-documents">
+            <div class="panel-header">
+                <h2 class="panel-title">📄 Documents</h2>
+                <span class="doc-count" id="docCount">0 documents</span>
+            </div>
+
+            <!-- Upload Zone -->
+            <div class="upload-zone" id="uploadZone">
+                <div class="upload-zone-content">
+                    <span class="upload-icon">📤</span>
+                    <p class="upload-text">Drag & drop a PDF here</p>
+                    <p class="upload-hint">or</p>
+                    <label class="upload-btn" for="fileInput">Choose File</label>
+                    <input type="file" id="fileInput" accept=".pdf" hidden>
+                </div>
+                <!-- Upload Progress -->
+                <div class="upload-progress" id="uploadProgress" hidden>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">Uploading...</p>
+                </div>
+            </div>
+
+            <!-- Document List -->
+            <div class="document-list" id="documentList">
+                <div class="empty-state" id="emptyDocState">
+                    <span class="empty-icon">📂</span>
+                    <p>No documents uploaded yet</p>
+                    <p class="empty-hint">Upload a PDF to get started</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Right Panel: Q&A Interface -->
+        <section class="panel panel-qa">
+            <div class="panel-header">
+                <h2 class="panel-title">💬 Ask a Question</h2>
+            </div>
+
+            <!-- Query Input -->
+            <div class="query-section">
+                <div class="query-controls">
+                    <label for="docFilter" class="filter-label">Search in:</label>
+                    <select id="docFilter" class="filter-select">
+                        <option value="">All Documents</option>
+                    </select>
+                </div>
+                <div class="query-input-group">
+                    <textarea
+                        id="questionInput"
+                        class="query-textarea"
+                        placeholder="Ask a question about your research papers..."
+                        rows="3"
+                    ></textarea>
+                    <button id="askBtn" class="ask-btn" disabled>
+                        <span class="ask-btn-text">Ask</span>
+                        <span class="ask-btn-icon">➜</span>
+                    </button>
+                </div>
+                <p class="query-hint">Press <kbd>Enter</kbd> to submit · <kbd>Shift+Enter</kbd> for new line</p>
+            </div>
+
+            <!-- Response Area -->
+            <div class="response-area" id="responseArea">
+                <!-- Initial State -->
+                <div class="initial-state" id="initialState">
+                    <span class="initial-icon">🧠</span>
+                    <p class="initial-text">Ask a question to get started</p>
+                    <p class="initial-hint">Upload documents and ask questions to analyze your research papers</p>
+                </div>
+
+                <!-- Loading Spinner -->
+                <div class="loading-state" id="loadingState" hidden>
+                    <div class="spinner"></div>
+                    <p class="loading-text">Analyzing your question...</p>
+                </div>
+
+                <!-- Answer Display -->
+                <div class="answer-container" id="answerContainer" hidden>
+                    <!-- Answer Body -->
+                    <div class="answer-section">
+                        <h3 class="section-label">Answer</h3>
+                        <div class="answer-body" id="answerBody"></div>
+                    </div>
+
+                    <!-- Source Citations -->
+                    <div class="sources-section" id="sourcesSection" hidden>
+                        <h3 class="section-label">Sources</h3>
+                        <div class="sources-list" id="sourcesList"></div>
+                    </div>
+
+                    <!-- Processing Metadata -->
+                    <div class="metadata-bar" id="metadataBar" hidden>
+                        <span class="meta-item" id="metaTime">
+                            ⏱ <span class="meta-value"></span>
+                        </span>
+                        <span class="meta-item" id="metaTokens">
+                            🔤 <span class="meta-value"></span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="status-bar">
+        <div class="status-left">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span class="status-text" id="statusText">Checking connection...</span>
+        </div>
+        <div class="status-right">
+            <span id="statusDocCount">0 documents indexed</span>
+        </div>
+    </footer>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# LangChain
+langchain==0.3.14
+langchain-core==0.3.29
+langchain-google-genai==2.0.8
+langchain-chroma==0.2.2
+langchain-text-splitters==0.3.4
+
+# Vector Store
+chromadb==0.6.3
+
+# PDF Processing
+pymupdf==1.25.3
+
+# Configuration
+pydantic==2.10.5
+pydantic-settings==2.7.1
+
+# Observability
+langsmith==0.2.13
+
+# Utilities
+python-dotenv==1.0.1
+
+# Evaluation
+numpy>=1.24.0
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
