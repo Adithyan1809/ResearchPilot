@@ -12,25 +12,30 @@ __pycache__/
 dist/
 build/
 
-# Data
-data/uploads/
-data/chroma_db/
-data/document_registry.json
+# Data & PDF files
+data/
+*.pdf
 
-# IDE
+# IDE & OS
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Evaluation results
+# Evaluation & Logs
 evaluation_results/
 *.log
+.pytest_cache/
 
 # Misc
 *.bak
 *.tmp
+
+# Excluded by project specifications
+docs/
+backend/tests/
+.agent/
+*.md
+!README.md
