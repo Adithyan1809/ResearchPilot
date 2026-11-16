@@ -36,6 +36,7 @@ from backend.app.models.schemas import (
 from backend.app.services.document_processor import DocumentProcessor
 from backend.app.services.embedding_service import EmbeddingService
 from backend.app.services.generator import GeneratorService
+from backend.app.services.reranker import RerankerService
 from backend.app.services.retriever import RetrieverService
 from backend.app.services.vector_store import VectorStoreService
 from backend.app.utils.logger import setup_logger
@@ -65,6 +66,7 @@ class RAGPipeline:
         self._embedding_service = EmbeddingService(settings)
         self._vector_store = VectorStoreService(settings, self._embedding_service)
         self._retriever = RetrieverService(self._vector_store, settings)
+        self._reranker = RerankerService(settings)
         self._generator = GeneratorService(settings)
 
         # Document registry path
@@ -72,6 +74,16 @@ class RAGPipeline:
         self._ensure_registry()
 
         logger.info("RAG pipeline ready.")
+
+    @property
+    def reranker(self) -> RerankerService:
+        """Return the reranker service."""
+        return self._reranker
+
+    @reranker.setter
+    def reranker(self, service: RerankerService) -> None:
+        """Set the reranker service (useful for test mocking)."""
+        self._reranker = service
 
     # ── Registry helpers ─────────────────────────────────────────────────
 
@@ -213,13 +225,28 @@ class RAGPipeline:
         start = time.perf_counter()
 
         try:
-            # 1. Retrieve (Hybrid RRF / Dense / BM25)
-            sources = self._retriever.retrieve(
-                query=request.question,
-                top_k=request.top_k,
-                doc_id=request.doc_id,
-                retrieval_mode=request.retrieval_mode,
-            )
+            # 1. Retrieve & Rerank (Two-Stage Retrieval)
+            if getattr(self._settings, "reranker_enabled", True):
+                candidates_k = getattr(self._settings, "reranker_candidates_k", 15)
+                candidates = self._retriever.retrieve(
+                    query=request.question,
+                    top_k=candidates_k,
+                    doc_id=request.doc_id,
+                    retrieval_mode=request.retrieval_mode,
+                )
+                target_top_k = request.top_k or getattr(self._settings, "reranker_top_k", 3)
+                sources = self._reranker.rerank(
+                    query=request.question,
+                    candidates=candidates,
+                    top_k=target_top_k,
+                )
+            else:
+                sources = self._retriever.retrieve(
+                    query=request.question,
+                    top_k=request.top_k or getattr(self._settings, "top_k", 5),
+                    doc_id=request.doc_id,
+                    retrieval_mode=request.retrieval_mode,
+                )
 
             # 2. Generate
             result = self._generator.generate(

@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     hybrid_bm25_weight: float = 1.0
     hybrid_candidate_multiplier: int = 2
 
+    # Reranker
+    reranker_enabled: bool = True
+    reranker_candidates_k: int = 15
+    reranker_top_k: int = 3
+    reranker_model: str = "gemini-3.5-flash-lite"
+
     # ChromaDB Vector Store
     chroma_persist_dir: str = "./data/chroma_db"
     chroma_collection_name: str = "research_papers"

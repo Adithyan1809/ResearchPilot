@@ -57,8 +57,8 @@ class QueryRequest(BaseModel):
         default=None,
         description="Optional document ID to restrict retrieval scope",
     )
-    top_k: int = Field(
-        default=5,
+    top_k: Optional[int] = Field(
+        default=3,
         ge=1,
         le=20,
         description="Number of source chunks to retrieve",
@@ -85,6 +85,10 @@ class SourceDocument(BaseModel):
     rrf_score: Optional[float] = Field(
         default=None,
         description="Reciprocal rank fusion score if hybrid retrieval was used",
+    )
+    rerank_score: Optional[float] = Field(
+        default=None,
+        description="Cross-encoder relevance score (0.0 to 1.0) after reranking",
     )
 
 
