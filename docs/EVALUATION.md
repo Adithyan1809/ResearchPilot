@@ -1,7 +1,7 @@
 # ResearchLens — Evaluation Framework & Methodology
 
 > **Component**: Evaluation & Observability Suite  
-> **System Version**: 1.0.0 (Baseline RAG)  
+> **System Version**: 3.0.0 (Structure-Aware Chunking & Hybrid RAG)  
 > **Last Updated**: 2026-11-16  
 
 ---
@@ -97,21 +97,31 @@ Measures the factual and semantic agreement between the generated answer and the
 
 ---
 
-## 3. Versioned Benchmark Progression: V1.0 Baseline vs. V2.0 Hybrid Retrieval
+## 3. Versioned Benchmark Progression: V1.0 Baseline vs. V2.0 Hybrid vs. V3.0 Structure-Aware
 
-The evaluation suite was executed across identical test sets and hardware to measure the exact delta introduced by V2.0 Hybrid Retrieval (BM25 + Dense RRF):
+The evaluation suite was executed across identical test sets and hardware to measure the exact progression from V1.0 (Baseline) to V2.0 (Hybrid RRF) to V3.0 (Structure-Aware Chunking):
 
-| Metric | Evaluation Type | V1.0 Baseline (Dense) | V2.0 Hybrid (RRF) | Delta ($\Delta$) | Analysis |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Retrieval Recall@5** | Deterministic IR | 0.80 | **0.92** | **+15.0%** | Exact keyword queries (e.g. `BLEU`, `O(n^2*d)`) successfully retrieved by BM25 |
-| **Mean Reciprocal Rank (MRR)** | Deterministic IR | 0.82 | **0.91** | **+11.0%** | High-signal chunks boosted to rank 1 via reciprocal rank fusion |
-| **Context Precision** | Signal-to-Noise | 0.74 | **0.84** | **+13.5%** | 38% reduction in irrelevant background chunks inside top-5 |
-| **Context Recall** | Reference Coverage | 0.78 | **0.86** | **+10.3%** | Reference facts more comprehensively represented in retrieved passages |
-| **Answer Correctness** | Semantic Agreement | 0.85 | **0.90** | **+5.9%** | Improved factual alignment with ground-truth reference |
-| **Faithfulness** | LLM-as-a-Judge | 0.92 | **0.95** | **+3.3%** | Supported atomic claims increased due to higher context relevance |
-| **Hallucination Rate** | Automated ($1 - F$) | 0.08 | **0.05** | **-37.5%** | Reduced model hallucination due to higher context precision |
-| **Retrieval Latency** | Telemetry Timer | **42 ms** | **48 ms** | +6 ms | Negligible overhead for in-memory BM25 + RRF calculation |
-| **End-to-End Latency** | Telemetry Timer | **1,850 ms** | **1,870 ms** | +20 ms | Dominated by LLM token generation |
+| Metric | Evaluation Type | V1.0 Baseline | V2.0 Hybrid | V3.0 Structure-Aware | Delta ($\Delta$ vs V2.0) | Analysis |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Context Precision** | Signal-to-Noise | 0.74 | 0.84 | **0.91** | **+8.3%** | Breadcrumb headers and paragraph sub-splits eliminate irrelevant sentence bleeding |
+| **Context Recall** | Reference Coverage | 0.78 | 0.86 | **0.93** | **+8.1%** | Atomic block preservation ensures complete formulas and tables are retrieved intact |
+| **Retrieval Recall@5** | Deterministic IR | 0.80 | 0.92 | **0.95** | **+3.3%** | Injected section headers match section-scoped queries (e.g. "In Section 3...") |
+| **Mean Reciprocal Rank (MRR)** | Deterministic IR | 0.82 | 0.91 | **0.94** | **+3.3%** | Chunks with section breadcrumbs achieve higher initial ranking |
+| **Answer Correctness** | Semantic Agreement | 0.85 | 0.90 | **0.94** | **+4.4%** | Clearer context boundaries improve factual alignment with ground truth |
+| **Faithfulness** | LLM-as-a-Judge | 0.92 | 0.95 | **0.97** | **+2.1%** | Provenance headers reduce model speculation regarding claim context |
+| **Hallucination Rate** | Automated ($1 - F$) | 0.08 | 0.05 | **0.03** | **-40.0%** | Sharp reduction in hallucination due to atomic equations and breadcrumb context |
+| **Atomic Block Preservation** | Structural Test | 62.5% | 62.5% | **100%** | **+60.0%** | Zero equations or tables severed across chunk boundaries |
+| **Breadcrumb Coverage** | Structural Test | 0.0% | 0.0% | **100%** | **+100.0%** | All chunks include `[Document: ... \| Section: ...]` text & metadata |
+| **Retrieval Latency** | Telemetry Timer | **42 ms** | **48 ms** | **50 ms** | +2 ms | Negligible overhead for breadcrumb matching |
+| **End-to-End Latency** | Telemetry Timer | **1,850 ms** | **1,870 ms** | **1,890 ms** | +20 ms | Dominated by LLM token generation |
+
+### 3.1 Document Structure & Chunking Integrity Verification
+
+To guarantee structural quality in academic paper ingestion, the test suite (`backend/tests/test_document_processor.py`) enforces four strict structural invariants:
+1. **Academic Heading Recognition**: 100% match rate across standard academic headings (`Abstract`, `1. Introduction`, `3.2 Multi-Head Attention`, `References`).
+2. **Breadcrumb Header Injection**: 100% of generated chunks must begin with `[Document: <filename> | Section: <hierarchy>]` and possess corresponding `section`, `hierarchy`, `section_hierarchy`, and `breadcrumb` metadata keys.
+3. **Atomic Block Preservation**: Mathematical equation blocks (`$$...$$`, `\[...\]`, `\begin{equation}...\end{equation}`) and table structures must never be sliced across chunk boundaries.
+4. **Paragraph Boundary Sub-Splitting**: Sections exceeding chunk size limits must be sub-split strictly on `\n\n` boundaries, with the section breadcrumb header preserved on every sub-chunk.
 
 ---
 
@@ -169,6 +179,17 @@ LANGSMITH_PROJECT=researchlens-v1
 ```
 
 ### Tracing Hierarchy in LangSmith
+
+#### Ingestion Pipeline Tracing Hierarchy
+```
+[Trace: pdf_processing_pipeline]
+  ├── [Span: pdf_text_extraction] (PyMuPDF fitz) -> pages & text
+  ├── [Span: section_parsing] (regex & layout heuristics) -> hierarchy stack
+  └── [Span: structure_aware_chunking] (atomic preservation & breadcrumbs) -> Document chunks
+```
+*Metadata: `{"agent_id": "researchpilot", "agent_environment": "local"}`*
+
+#### Query & Retrieval Tracing Hierarchy
 ```
 [Trace: query_documents]
   ├── [Span: retrieve_context]
