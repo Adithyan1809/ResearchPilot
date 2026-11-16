@@ -125,7 +125,20 @@ class RerankerService:
         else:
             content = output
 
-        # 2. If content is already a list or dict
+        # Handle LangChain content block lists, e.g. [{'type': 'text', 'text': '...'}]
+        if isinstance(content, list):
+            if content and any(isinstance(p, dict) and "text" in p for p in content):
+                text_parts = []
+                for p in content:
+                    if isinstance(p, dict) and "text" in p:
+                        text_parts.append(p["text"])
+                    elif isinstance(p, str):
+                        text_parts.append(p)
+                content = "".join(text_parts)
+            elif content and all(isinstance(p, str) for p in content):
+                content = "".join(content)
+
+        # 2. If content is already a list or dict of candidate scores
         if isinstance(content, list):
             for i, item in enumerate(content):
                 if isinstance(item, dict):
