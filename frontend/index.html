@@ -3,143 +3,185 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ResearchLens — AI-Powered Research Paper Analysis</title>
+    <title>ResearchLens — AI Academic Research Assistant</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
-<body>
-    <!-- Header -->
-    <header class="app-header">
-        <div class="header-brand">
-            <h1 class="header-title">
+<body class="app-layout">
+    <!-- Left Sidebar: Chat History (ChatGPT Style) -->
+    <aside class="sidebar-history" id="sidebarHistory">
+        <div class="sidebar-header">
+            <div class="brand-badge">
                 <span class="brand-icon">🔬</span>
-                ResearchLens
-                <span class="version-badge">v5.0 Streaming & Memory</span>
-            </h1>
-            <p class="header-subtitle">AI-Powered Research Paper Analysis with Two-Stage Retrieval & Conversational Memory</p>
+                <span class="brand-name">ResearchLens</span>
+                <span class="brand-ver">v5.0</span>
+            </div>
+            <button id="newChatBtn" class="btn-new-chat" title="Start a fresh conversation">
+                <span class="btn-icon">＋</span>
+                <span>New Chat</span>
+            </button>
         </div>
-    </header>
 
-    <!-- Main Content -->
-    <main class="app-main">
-        <!-- Left Panel: Document Management -->
-        <aside class="panel panel-documents">
-            <div class="panel-header">
-                <h2 class="panel-title">📄 Documents</h2>
-                <span class="doc-count" id="docCount">0 documents</span>
-            </div>
-
-            <!-- Upload Zone -->
-            <div class="upload-zone" id="uploadZone">
-                <div class="upload-zone-content">
-                    <span class="upload-icon">📤</span>
-                    <p class="upload-text">Drag & drop a PDF here</p>
-                    <p class="upload-hint">or</p>
-                    <label class="upload-btn" for="fileInput">Choose File</label>
-                    <input type="file" id="fileInput" accept=".pdf" hidden>
-                </div>
-                <!-- Upload Progress -->
-                <div class="upload-progress" id="uploadProgress" hidden>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <p class="progress-text" id="progressText">Uploading...</p>
+        <div class="history-section">
+            <div class="history-label">Past Conversations</div>
+            <div class="session-list" id="sessionList">
+                <div class="empty-sessions" id="emptySessions">
+                    <span>💬</span>
+                    <p>No previous conversations</p>
                 </div>
             </div>
+        </div>
 
-            <!-- Document List -->
-            <div class="document-list" id="documentList">
-                <div class="empty-state" id="emptyDocState">
-                    <span class="empty-icon">📂</span>
-                    <p>No documents uploaded yet</p>
-                    <p class="empty-hint">Upload a PDF to get started</p>
-                </div>
+        <div class="sidebar-footer">
+            <div class="status-pill">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span class="status-text" id="statusText">Connecting...</span>
             </div>
-        </aside>
+        </div>
+    </aside>
 
-        <!-- Right Panel: Q&A Interface -->
-        <section class="panel panel-qa">
-            <div class="panel-header">
-                <h2 class="panel-title">💬 Research Assistant</h2>
-                <div class="panel-actions">
-                    <label class="stream-toggle-label" title="Enable real-time token streaming">
-                        <input type="checkbox" id="streamToggle" checked>
-                        <span>⚡ Stream</span>
-                    </label>
-                    <button id="newChatBtn" class="new-chat-btn" title="Clear conversation history and start fresh">
-                        <span>🔄 New Chat</span>
+    <!-- Center Main Panel: Chat Thread & Input -->
+    <main class="chat-main" id="chatMain">
+        <!-- Top Navigation / Controls Bar -->
+        <header class="chat-topbar">
+            <div class="topbar-left">
+                <h1 class="chat-title" id="currentSessionTitle">Research Assistant</h1>
+                <span class="session-code" id="sessionTag" title="Active session ID">
+                    <code id="sessionIdDisplay">new</code>
+                </span>
+            </div>
+            <div class="topbar-right">
+                <div class="control-pill">
+                    <label for="retrievalModeSelect" class="pill-label">Strategy:</label>
+                    <select id="retrievalModeSelect" class="pill-select">
+                        <option value="hybrid" selected>⚡ Two-Stage (Hybrid + Reranker)</option>
+                        <option value="dense">🔍 Dense Semantic</option>
+                        <option value="bm25">🔤 Sparse BM25</option>
+                    </select>
+                </div>
+                <label class="stream-pill" title="Toggle real-time token streaming">
+                    <input type="checkbox" id="streamToggle" checked>
+                    <span>⚡ Stream</span>
+                </label>
+                <button id="toggleDocsBtn" class="btn-toggle-docs" title="Toggle Knowledge Base documents panel">
+                    <span>📄 Documents</span>
+                    <span class="doc-badge" id="docBadge">0</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Scrolling Conversation Area -->
+        <div class="chat-viewport" id="responseArea">
+            <!-- Initial Welcome Hero Screen -->
+            <div class="initial-hero" id="initialState">
+                <div class="hero-icon">🧠</div>
+                <h2 class="hero-title">How can I help with your research today?</h2>
+                <p class="hero-subtitle">
+                    Upload academic papers on the right panel, or ask technical questions across indexed literature with real-time streaming and multi-turn reasoning.
+                </p>
+                <!-- Suggested Prompt Chips -->
+                <div class="prompt-chips">
+                    <button class="chip" data-prompt="What is the Attention mechanism in Transformers?">
+                        <span class="chip-icon">⚡</span>
+                        <span>What is the Attention mechanism in Transformers?</span>
+                    </button>
+                    <button class="chip" data-prompt="Compare the training hardware and BLEU scores between base and big models.">
+                        <span class="chip-icon">📊</span>
+                        <span>Compare base vs big model BLEU scores & hardware</span>
+                    </button>
+                    <button class="chip" data-prompt="What optimizer and learning rate schedule was used?">
+                        <span class="chip-icon">⚙️</span>
+                        <span>What optimizer and learning rate schedule was used?</span>
+                    </button>
+                    <button class="chip" data-prompt="Explain Scaled Dot-Product Attention vs Multi-Head Attention.">
+                        <span class="chip-icon">🔍</span>
+                        <span>Scaled Dot-Product vs Multi-Head Attention</span>
                     </button>
                 </div>
             </div>
 
-            <!-- Response / Chat Thread Area -->
-            <div class="response-area" id="responseArea">
-                <!-- Initial State -->
-                <div class="initial-state" id="initialState">
-                    <span class="initial-icon">🧠</span>
-                    <p class="initial-text">Ask a question to begin research analysis</p>
-                    <p class="initial-hint">Upload documents and ask questions with real-time streaming and multi-turn conversational context.</p>
-                </div>
+            <!-- Chat Message Thread -->
+            <div class="chat-thread" id="chatThread"></div>
 
-                <!-- Chat History Messages Container -->
-                <div class="chat-thread" id="chatThread"></div>
-
-                <!-- Loading Spinner / Status -->
-                <div class="loading-state" id="loadingState" hidden>
-                    <div class="spinner"></div>
-                    <p class="loading-text" id="loadingText">Retrieving & reranking papers...</p>
-                </div>
+            <!-- Loading Spinner (Strictly hidden by default) -->
+            <div class="loading-state" id="loadingState" hidden>
+                <div class="pulsing-spinner"></div>
+                <p class="loading-text" id="loadingText">Retrieving knowledge base & reranking...</p>
             </div>
+        </div>
 
-            <!-- Query Input Section -->
-            <div class="query-section">
-                <div class="query-controls">
-                    <div class="control-item">
-                        <label for="docFilter" class="filter-label">Search in:</label>
-                        <select id="docFilter" class="filter-select">
-                            <option value="">All Documents</option>
-                        </select>
-                    </div>
-                    <div class="control-item">
-                        <label for="retrievalModeSelect" class="filter-label">Strategy:</label>
-                        <select id="retrievalModeSelect" class="filter-select">
-                            <option value="hybrid" selected>⚡ Two-Stage Reranked (Hybrid + Reranker)</option>
-                            <option value="dense">🔍 Dense Semantic Vector</option>
-                            <option value="bm25">🔤 Sparse Lexical (BM25)</option>
-                        </select>
-                    </div>
-                    <div class="control-item session-tag" id="sessionTag" title="Active conversation session">
-                        <span>💬 Session: <code id="sessionIdDisplay">new</code></span>
-                    </div>
+        <!-- Pinned Bottom Floating Input -->
+        <footer class="input-container">
+            <div class="input-card">
+                <div class="input-filter-row">
+                    <span class="filter-icon">🎯</span>
+                    <label for="docFilter" class="filter-label">Filter:</label>
+                    <select id="docFilter" class="input-doc-select">
+                        <option value="">All Documents</option>
+                    </select>
                 </div>
-                <div class="query-input-group">
+                <div class="input-textarea-row">
                     <textarea
                         id="questionInput"
-                        class="query-textarea"
-                        placeholder="Ask a question or follow-up in context (e.g. 'What was their optimizer?')..."
-                        rows="2"
+                        class="chat-textarea"
+                        placeholder="Ask a technical research question or follow-up in context..."
+                        rows="1"
                     ></textarea>
-                    <button id="askBtn" class="ask-btn" disabled>
-                        <span class="ask-btn-text">Send</span>
-                        <span class="ask-btn-icon">➜</span>
+                    <button id="askBtn" class="btn-send" disabled title="Send message">
+                        <svg class="send-icon" viewBox="0 0 24 24" width="18" height="18">
+                            <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
                     </button>
                 </div>
-                <p class="query-hint">Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line · Multi-turn memory active</p>
+                <div class="input-footer-hint">
+                    <span>Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line · Multi-turn memory active</span>
+                </div>
             </div>
-        </section>
+        </footer>
     </main>
 
-    <!-- Status Bar -->
-    <footer class="status-bar">
-        <div class="status-left">
-            <span class="status-indicator" id="statusIndicator"></span>
-            <span class="status-text" id="statusText">Checking connection...</span>
+    <!-- Right Sidebar: Documents & Knowledge Base -->
+    <aside class="sidebar-docs" id="sidebarDocs">
+        <div class="docs-header">
+            <div class="docs-title-group">
+                <h3 class="docs-title">📄 Knowledge Base</h3>
+                <span class="doc-count-badge" id="docCount">0 papers</span>
+            </div>
         </div>
-        <div class="status-right">
-            <span id="statusDocCount">0 documents indexed</span>
-        </div>
-    </footer>
 
-    <!-- Toast Container -->
+        <!-- Upload Zone -->
+        <div class="upload-zone" id="uploadZone">
+            <div class="upload-zone-content">
+                <span class="upload-icon">📤</span>
+                <p class="upload-text">Drop research PDF here</p>
+                <p class="upload-subtext">or</p>
+                <label class="btn-browse" for="fileInput">Choose File</label>
+                <input type="file" id="fileInput" accept=".pdf" hidden>
+            </div>
+            <!-- Upload Progress -->
+            <div class="upload-progress" id="uploadProgress" hidden>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p class="progress-text" id="progressText">Uploading and chunking...</p>
+            </div>
+        </div>
+
+        <!-- Document List -->
+        <div class="docs-list-container">
+            <div class="docs-list-header">
+                <span>Indexed Documents</span>
+            </div>
+            <div class="document-list" id="documentList">
+                <div class="empty-docs" id="emptyDocState">
+                    <span>📂</span>
+                    <p>No documents uploaded yet</p>
+                    <p class="empty-hint">Upload PDFs to search and cite in chat</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
     <script src="js/app.js"></script>

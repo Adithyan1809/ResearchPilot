@@ -1,6 +1,6 @@
 /**
  * ResearchLens — Frontend Application Logic (v5.0)
- * Conversational Multi-Turn Research Assistant with Real-Time Token Streaming (SSE)
+ * ChatGPT-Style 3-Column Interface with Conversational Multi-Turn Memory & Real-Time Token Streaming (SSE)
  */
 
 const API_BASE = '/api/v1';
@@ -8,13 +8,42 @@ const API_BASE = '/api/v1';
 class ResearchLensApp {
     constructor() {
         this.documents = [];
+        this.sessions = [];
         this.isProcessing = false;
         this.healthInterval = null;
         this.sessionId = localStorage.getItem('researchlens_session_id') || null;
-        this.chatTurns = [];
 
         // Cache DOM elements
         this.elements = {
+            // Sidebar History
+            sidebarHistory: document.getElementById('sidebarHistory'),
+            newChatBtn: document.getElementById('newChatBtn'),
+            sessionList: document.getElementById('sessionList'),
+            emptySessions: document.getElementById('emptySessions'),
+            statusIndicator: document.getElementById('statusIndicator'),
+            statusText: document.getElementById('statusText'),
+
+            // Center Panel
+            chatMain: document.getElementById('chatMain'),
+            currentSessionTitle: document.getElementById('currentSessionTitle'),
+            sessionIdDisplay: document.getElementById('sessionIdDisplay'),
+            retrievalModeSelect: document.getElementById('retrievalModeSelect'),
+            streamToggle: document.getElementById('streamToggle'),
+            toggleDocsBtn: document.getElementById('toggleDocsBtn'),
+            docBadge: document.getElementById('docBadge'),
+            responseArea: document.getElementById('responseArea'),
+            initialState: document.getElementById('initialState'),
+            chatThread: document.getElementById('chatThread'),
+            loadingState: document.getElementById('loadingState'),
+            loadingText: document.getElementById('loadingText'),
+
+            // Input Bar
+            docFilter: document.getElementById('docFilter'),
+            questionInput: document.getElementById('questionInput'),
+            askBtn: document.getElementById('askBtn'),
+
+            // Right Sidebar Docs
+            sidebarDocs: document.getElementById('sidebarDocs'),
             docCount: document.getElementById('docCount'),
             uploadZone: document.getElementById('uploadZone'),
             fileInput: document.getElementById('fileInput'),
@@ -23,21 +52,8 @@ class ResearchLensApp {
             progressText: document.getElementById('progressText'),
             documentList: document.getElementById('documentList'),
             emptyDocState: document.getElementById('emptyDocState'),
-            docFilter: document.getElementById('docFilter'),
-            questionInput: document.getElementById('questionInput'),
-            askBtn: document.getElementById('askBtn'),
-            responseArea: document.getElementById('responseArea'),
-            initialState: document.getElementById('initialState'),
-            chatThread: document.getElementById('chatThread'),
-            loadingState: document.getElementById('loadingState'),
-            loadingText: document.getElementById('loadingText'),
-            streamToggle: document.getElementById('streamToggle'),
-            newChatBtn: document.getElementById('newChatBtn'),
-            sessionIdDisplay: document.getElementById('sessionIdDisplay'),
-            retrievalModeSelect: document.getElementById('retrievalModeSelect'),
-            statusIndicator: document.getElementById('statusIndicator'),
-            statusText: document.getElementById('statusText'),
-            statusDocCount: document.getElementById('statusDocCount'),
+
+            // Toast
             toastContainer: document.getElementById('toastContainer'),
         };
 
@@ -47,6 +63,10 @@ class ResearchLensApp {
     init() {
         this.setupEventListeners();
         this.setupDragAndDrop();
+        this.setupPromptChips();
+        this.setupTextareaAutoResize();
+
+        this.loadSessions();
         this.loadDocuments();
         this.checkHealth();
         this.initSession();
@@ -54,6 +74,8 @@ class ResearchLensApp {
         // Periodic health check every 30 seconds
         this.healthInterval = setInterval(() => this.checkHealth(), 30000);
     }
+
+    // ── Session Management ───────────────────────────────────────────────────
 
     initSession() {
         if (this.sessionId) {
@@ -71,11 +93,105 @@ class ResearchLensApp {
         this.elements.sessionIdDisplay.title = id ? `Session ID: ${id}` : 'New session';
     }
 
+    async loadSessions() {
+        try {
+            const resp = await fetch(`${API_BASE}/sessions`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            this.sessions = data.sessions || [];
+            this.renderSessionList();
+        } catch (err) {
+            console.error('Failed to load sessions:', err);
+        }
+    }
+
+    renderSessionList() {
+        const list = this.elements.sessionList;
+        const empty = this.elements.emptySessions;
+
+        // Clear existing session items (keep empty placeholder)
+        list.querySelectorAll('.session-item').forEach((el) => el.remove());
+
+        if (this.sessions.length === 0) {
+            if (empty) empty.hidden = false;
+            return;
+        }
+
+        if (empty) empty.hidden = true;
+
+        this.sessions.forEach((sess) => {
+            const item = document.createElement('div');
+            item.className = 'session-item';
+            if (sess.session_id === this.sessionId) {
+                item.classList.add('active');
+            }
+            item.dataset.id = sess.session_id;
+
+            const title = sess.title || `Conversation ${sess.session_id.substring(0, 6)}`;
+            const countText = `${sess.message_count || 0} messages`;
+
+            item.innerHTML = `
+                <div class="session-item-content">
+                    <span class="session-item-title" title="${this.escapeHtml(title)}">${this.escapeHtml(title)}</span>
+                    <span class="session-item-meta">${countText}</span>
+                </div>
+                <button class="session-delete-btn" title="Delete conversation" data-id="${sess.session_id}">🗑</button>
+            `;
+
+            // Click to switch
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.session-delete-btn')) return;
+                this.switchSession(sess.session_id);
+            });
+
+            // Click to delete
+            const delBtn = item.querySelector('.session-delete-btn');
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteSession(sess.session_id);
+            });
+
+            list.appendChild(item);
+        });
+    }
+
+    async switchSession(sessionId) {
+        if (this.isProcessing) {
+            this.showToast('Please wait for current query to finish.', 'info');
+            return;
+        }
+
+        this.sessionId = sessionId;
+        localStorage.setItem('researchlens_session_id', sessionId);
+        this.updateSessionDisplay(sessionId);
+
+        // Highlight in sidebar
+        this.elements.sessionList.querySelectorAll('.session-item').forEach((el) => {
+            if (el.dataset.id === sessionId) {
+                el.classList.add('active');
+            } else {
+                el.classList.remove('active');
+            }
+        });
+
+        // Clear chat thread & load messages
+        this.elements.chatThread.innerHTML = '';
+        await this.restoreSessionHistory(sessionId);
+    }
+
     async restoreSessionHistory(sessionId) {
         try {
             const resp = await fetch(`${API_BASE}/sessions/${sessionId}`);
-            if (!resp.ok) return;
+            if (!resp.ok) {
+                this.startNewChat();
+                return;
+            }
             const data = await resp.json();
+
+            if (data.title && this.elements.currentSessionTitle) {
+                this.elements.currentSessionTitle.textContent = data.title;
+            }
+
             if (data.messages && data.messages.length > 0) {
                 this.elements.initialState.hidden = true;
                 // Group pairs of user + assistant
@@ -86,8 +202,13 @@ class ResearchLensApp {
                         this.renderHistoricalTurn(userMsg.content, assistMsg ? assistMsg.content : '');
                     }
                 }
+                this.elements.responseArea.scrollTop = this.elements.responseArea.scrollHeight;
+            } else {
+                this.elements.initialState.hidden = false;
             }
-        } catch (_) {}
+        } catch (_) {
+            this.elements.initialState.hidden = false;
+        }
     }
 
     renderHistoricalTurn(question, answer) {
@@ -110,6 +231,58 @@ class ResearchLensApp {
         turnDiv.appendChild(userBubble);
         turnDiv.appendChild(assistBubble);
         this.elements.chatThread.appendChild(turnDiv);
+    }
+
+    async startNewChat() {
+        try {
+            const resp = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
+            if (resp.ok) {
+                const data = await resp.json();
+                this.sessionId = data.session_id;
+                localStorage.setItem('researchlens_session_id', this.sessionId);
+                this.updateSessionDisplay(this.sessionId);
+            }
+        } catch (_) {
+            this.sessionId = null;
+            localStorage.removeItem('researchlens_session_id');
+            this.updateSessionDisplay('new');
+        }
+
+        // Reset UI
+        this.elements.chatThread.innerHTML = '';
+        this.elements.initialState.hidden = false;
+        this.elements.questionInput.value = '';
+        this.elements.questionInput.style.height = 'auto';
+        this.elements.askBtn.disabled = true;
+        if (this.elements.currentSessionTitle) {
+            this.elements.currentSessionTitle.textContent = 'Research Assistant';
+        }
+
+        await this.loadSessions();
+        this.showToast('Started a new conversation session.', 'info');
+    }
+
+    async deleteSession(sessionId) {
+        if (!confirm('Are you sure you want to delete this conversation?')) {
+            return;
+        }
+
+        try {
+            const resp = await fetch(`${API_BASE}/sessions/${sessionId}`, { method: 'DELETE' });
+            if (!resp.ok) {
+                throw new Error('Failed to delete session');
+            }
+
+            this.showToast('Conversation deleted.', 'info');
+
+            if (this.sessionId === sessionId) {
+                await this.startNewChat();
+            } else {
+                await this.loadSessions();
+            }
+        } catch (err) {
+            this.showToast(`Error deleting session: ${err.message}`, 'error');
+        }
     }
 
     // ── Event Listeners ──────────────────────────────────────────────────────
@@ -152,35 +325,46 @@ class ResearchLensApp {
                 this.startNewChat();
             });
         }
+
+        // Toggle Documents Right Panel
+        if (this.elements.toggleDocsBtn && this.elements.sidebarDocs) {
+            this.elements.toggleDocsBtn.addEventListener('click', () => {
+                this.elements.sidebarDocs.classList.toggle('collapsed');
+                this.elements.toggleDocsBtn.classList.toggle('active');
+            });
+        }
     }
 
-    async startNewChat() {
-        try {
-            const resp = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
-            if (resp.ok) {
-                const data = await resp.json();
-                this.sessionId = data.session_id;
-                localStorage.setItem('researchlens_session_id', this.sessionId);
-                this.updateSessionDisplay(this.sessionId);
-            }
-        } catch (_) {
-            this.sessionId = null;
-            localStorage.removeItem('researchlens_session_id');
-            this.updateSessionDisplay('new');
-        }
+    setupPromptChips() {
+        const chips = document.querySelectorAll('.prompt-chips .chip');
+        chips.forEach((chip) => {
+            chip.addEventListener('click', () => {
+                const prompt = chip.dataset.prompt || chip.innerText.trim();
+                if (prompt) {
+                    this.elements.questionInput.value = prompt;
+                    this.elements.askBtn.disabled = false;
+                    this.elements.questionInput.focus();
+                    this.askQuestion();
+                }
+            });
+        });
+    }
 
-        // Clear UI thread
-        this.elements.chatThread.innerHTML = '';
-        this.elements.initialState.hidden = false;
-        this.elements.questionInput.value = '';
-        this.elements.askBtn.disabled = true;
-        this.showToast('Started a new conversation session.', 'info');
+    setupTextareaAutoResize() {
+        const textarea = this.elements.questionInput;
+        if (!textarea) return;
+
+        textarea.addEventListener('input', () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
+        });
     }
 
     // ── Drag and Drop ────────────────────────────────────────────────────────
 
     setupDragAndDrop() {
         const zone = this.elements.uploadZone;
+        if (!zone) return;
 
         ['dragenter', 'dragover'].forEach((eventName) => {
             zone.addEventListener(eventName, (e) => {
@@ -359,7 +543,7 @@ class ResearchLensApp {
             const option = document.createElement('option');
             option.value = doc.doc_id;
             option.textContent =
-                doc.filename.length > 30 ? doc.filename.substring(0, 27) + '...' : doc.filename;
+                doc.filename.length > 28 ? doc.filename.substring(0, 25) + '...' : doc.filename;
             select.appendChild(option);
         });
 
@@ -408,6 +592,7 @@ class ResearchLensApp {
 
         this.setProcessing(true);
         this.elements.questionInput.value = '';
+        this.elements.questionInput.style.height = 'auto';
         this.elements.initialState.hidden = true;
 
         // Create UI Turn in Chat Thread
@@ -516,6 +701,9 @@ class ResearchLensApp {
                     }
                     turnDiv.scrollIntoView({ behavior: 'smooth' });
                 }
+
+                // Refresh sessions to get updated title
+                await this.loadSessions();
             } catch (err) {
                 bodyDiv.innerHTML = `<span style="color:var(--color-error)">Streaming query failed: ${this.escapeHtml(err.message)}</span>`;
                 this.showToast(`Query error: ${err.message}`, 'error');
@@ -551,6 +739,9 @@ class ResearchLensApp {
                     metaDiv.hidden = false;
                     metaTime.textContent = `⏱ Response time: ${data.processing_time_ms} ms`;
                 }
+
+                // Refresh sessions to get updated title
+                await this.loadSessions();
             } catch (err) {
                 bodyDiv.innerHTML = `<span style="color:var(--color-error)">Query failed: ${this.escapeHtml(err.message)}</span>`;
                 this.showToast(`Query error: ${err.message}`, 'error');
@@ -602,31 +793,30 @@ class ResearchLensApp {
             if (response.ok) {
                 const data = await response.json();
                 this.elements.statusIndicator.className = 'status-indicator status-online';
-                this.elements.statusText.textContent = `Connected (v${data.version})`;
-                this.elements.statusDocCount.textContent = `${data.documents_count} documents indexed (${data.chunks_count} chunks)`;
+                this.elements.statusText.textContent = `Online · v${data.version}`;
+                this.updateDocCounts(data.documents_count);
             } else {
                 throw new Error('Unhealthy');
             }
         } catch (_) {
             this.elements.statusIndicator.className = 'status-indicator status-offline';
-            this.elements.statusText.textContent = 'Disconnected';
-            this.elements.statusDocCount.textContent = 'Backend offline';
+            this.elements.statusText.textContent = 'Offline';
         }
     }
 
     setProcessing(processing) {
         this.isProcessing = processing;
         this.elements.askBtn.disabled = processing || this.elements.questionInput.value.trim().length < 3;
-        if (processing) {
-            this.elements.askBtn.classList.add('loading');
-        } else {
-            this.elements.askBtn.classList.remove('loading');
+        // Strictly keep loadingState hidden unless needed for non-streaming
+        if (this.elements.loadingState) {
+            this.elements.loadingState.hidden = true;
         }
     }
 
     updateDocCounts(count) {
-        const text = count === 1 ? '1 document' : `${count} documents`;
-        this.elements.docCount.textContent = text;
+        const text = count === 1 ? '1 paper' : `${count} papers`;
+        if (this.elements.docCount) this.elements.docCount.textContent = text;
+        if (this.elements.docBadge) this.elements.docBadge.textContent = count;
     }
 
     showToast(message, type = 'info') {

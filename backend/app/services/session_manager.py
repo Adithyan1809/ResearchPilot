@@ -40,13 +40,17 @@ class SessionManagerService:
             max_history_messages,
         )
 
-    def create_session(self, session_id: Optional[str] = None) -> str:
+    def create_session(
+        self, session_id: Optional[str] = None, title: Optional[str] = None
+    ) -> str:
         """Create a new conversational session.
 
         Parameters
         ----------
         session_id:
             Optional custom session ID. If not provided, a UUID4 string is generated.
+        title:
+            Optional title for the session.
 
         Returns
         -------
@@ -59,6 +63,7 @@ class SessionManagerService:
             if sid not in self._sessions:
                 self._sessions[sid] = {
                     "session_id": sid,
+                    "title": title,
                     "messages": [],
                     "created_at": now,
                     "updated_at": now,
@@ -66,15 +71,18 @@ class SessionManagerService:
                 logger.info("Created new session: %s", sid)
         return sid
 
-    def get_or_create_session(self, session_id: Optional[str] = None) -> str:
+    def get_or_create_session(
+        self, session_id: Optional[str] = None, title: Optional[str] = None
+    ) -> str:
         """Retrieve existing session or create a new one."""
         if not session_id:
-            return self.create_session()
+            return self.create_session(title=title)
         with self._lock:
             if session_id not in self._sessions:
                 now = _utc_now()
                 self._sessions[session_id] = {
                     "session_id": session_id,
+                    "title": title,
                     "messages": [],
                     "created_at": now,
                     "updated_at": now,
@@ -114,6 +122,9 @@ class SessionManagerService:
                     "updated_at": now,
                 }
             session = self._sessions[session_id]
+            if not session.get("title") and role == "user":
+                clean_title = content.strip().replace("\n", " ")
+                session["title"] = clean_title[:42] + ("..." if len(clean_title) > 42 else "")
             session["messages"].append(message)
             session["updated_at"] = now
 
@@ -154,6 +165,7 @@ class SessionManagerService:
                 results.append(
                     SessionInfo(
                         session_id=sid,
+                        title=data.get("title") or "New Research Chat",
                         message_count=len(data["messages"]),
                         created_at=data["created_at"],
                         updated_at=data["updated_at"],
@@ -171,6 +183,7 @@ class SessionManagerService:
                 return None
             return SessionInfo(
                 session_id=session_id,
+                title=data.get("title") or "New Research Chat",
                 message_count=len(data["messages"]),
                 created_at=data["created_at"],
                 updated_at=data["updated_at"],

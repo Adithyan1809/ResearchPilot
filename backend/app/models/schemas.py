@@ -27,6 +27,7 @@ class SessionInfo(BaseModel):
     """Summary of an active conversational session."""
 
     session_id: str = Field(..., description="Unique session identifier")
+    title: Optional[str] = Field(default=None, description="Conversational session title")
     message_count: int = Field(..., ge=0, description="Total messages in session history")
     created_at: datetime = Field(..., description="UTC creation timestamp")
     updated_at: datetime = Field(..., description="UTC last active timestamp")
@@ -36,6 +37,7 @@ class SessionResponse(BaseModel):
     """Detailed view of a session including full message history."""
 
     session_id: str = Field(..., description="Unique session identifier")
+    title: Optional[str] = Field(default=None, description="Conversational session title")
     messages: List[ChatMessage] = Field(
         default_factory=list,
         description="Chronological message history",

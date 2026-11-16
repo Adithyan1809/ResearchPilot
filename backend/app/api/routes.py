@@ -10,8 +10,8 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.config import get_settings
-from app.models.schemas import (
+from backend.app.config import get_settings
+from backend.app.models.schemas import (
     DocumentListResponse,
     ErrorResponse,
     HealthResponse,
@@ -22,7 +22,7 @@ from app.models.schemas import (
     SessionListResponse,
     SessionResponse,
 )
-from app.utils.logger import setup_logger
+from backend.app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -235,19 +235,19 @@ async def get_session(request: Request, session_id: str):
 
 @router.delete(
     "/sessions/{session_id}",
-    summary="Clear conversation session history",
-    description="Reset all message history for a conversational session.",
+    summary="Delete conversation session",
+    description="Permanently delete a conversation session and its message history.",
 )
-async def clear_session(request: Request, session_id: str):
-    """Clear conversation history for a session."""
+async def delete_session(request: Request, session_id: str):
+    """Delete a conversation session."""
     pipeline = _get_pipeline(request)
-    success = pipeline.clear_session(session_id)
+    success = pipeline.delete_session(session_id)
     if not success:
         raise HTTPException(
             status_code=404,
             detail=f"Session with ID '{session_id}' not found.",
         )
-    return {"session_id": session_id, "message": "Session history cleared successfully."}
+    return {"session_id": session_id, "message": "Session cleared and deleted successfully."}
 
 
 # ── Health ───────────────────────────────────────────────────────────────────

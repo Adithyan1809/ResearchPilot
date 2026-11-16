@@ -426,12 +426,14 @@ class RAGPipeline:
         if not info:
             return SessionResponse(
                 session_id=session_id,
+                title="New Research Chat",
                 messages=[],
                 created_at=now,
                 updated_at=now,
             )
         return SessionResponse(
             session_id=session_id,
+            title=info.title or "New Research Chat",
             messages=history,
             created_at=info.created_at,
             updated_at=info.updated_at,
@@ -440,6 +442,10 @@ class RAGPipeline:
     def clear_session(self, session_id: str) -> bool:
         """Clear conversation history for a session."""
         return self._session_manager.clear_session(session_id)
+
+    def delete_session(self, session_id: str) -> bool:
+        """Permanently remove a session."""
+        return self._session_manager.delete_session(session_id)
 
     def list_sessions(self) -> List[SessionInfo]:
         """List all active conversation sessions."""

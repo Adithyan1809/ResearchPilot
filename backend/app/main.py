@@ -15,10 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import router as api_router
-from app.config import Settings, get_settings
-from app.services.rag_pipeline import RAGPipeline
-from app.utils.logger import setup_logger
+from backend.app.api.routes import router as api_router
+from backend.app.config import Settings, get_settings
+from backend.app.services.rag_pipeline import RAGPipeline
+from backend.app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
