@@ -1,6 +1,6 @@
 /**
- * ResearchLens — Frontend Application Logic
- * Vanilla JavaScript implementation for PDF ingestion and RAG querying.
+ * ResearchLens — Frontend Application Logic (v5.0)
+ * Conversational Multi-Turn Research Assistant with Real-Time Token Streaming (SSE)
  */
 
 const API_BASE = '/api/v1';
@@ -10,6 +10,8 @@ class ResearchLensApp {
         this.documents = [];
         this.isProcessing = false;
         this.healthInterval = null;
+        this.sessionId = localStorage.getItem('researchlens_session_id') || null;
+        this.chatTurns = [];
 
         // Cache DOM elements
         this.elements = {
@@ -26,14 +28,13 @@ class ResearchLensApp {
             askBtn: document.getElementById('askBtn'),
             responseArea: document.getElementById('responseArea'),
             initialState: document.getElementById('initialState'),
+            chatThread: document.getElementById('chatThread'),
             loadingState: document.getElementById('loadingState'),
-            answerContainer: document.getElementById('answerContainer'),
-            answerBody: document.getElementById('answerBody'),
-            sourcesSection: document.getElementById('sourcesSection'),
-            sourcesList: document.getElementById('sourcesList'),
-            metadataBar: document.getElementById('metadataBar'),
-            metaTime: document.getElementById('metaTime'),
-            metaTokens: document.getElementById('metaTokens'),
+            loadingText: document.getElementById('loadingText'),
+            streamToggle: document.getElementById('streamToggle'),
+            newChatBtn: document.getElementById('newChatBtn'),
+            sessionIdDisplay: document.getElementById('sessionIdDisplay'),
+            retrievalModeSelect: document.getElementById('retrievalModeSelect'),
             statusIndicator: document.getElementById('statusIndicator'),
             statusText: document.getElementById('statusText'),
             statusDocCount: document.getElementById('statusDocCount'),
@@ -48,9 +49,67 @@ class ResearchLensApp {
         this.setupDragAndDrop();
         this.loadDocuments();
         this.checkHealth();
+        this.initSession();
 
         // Periodic health check every 30 seconds
         this.healthInterval = setInterval(() => this.checkHealth(), 30000);
+    }
+
+    initSession() {
+        if (this.sessionId) {
+            this.updateSessionDisplay(this.sessionId);
+            this.restoreSessionHistory(this.sessionId);
+        } else {
+            this.updateSessionDisplay('new');
+        }
+    }
+
+    updateSessionDisplay(id) {
+        if (!this.elements.sessionIdDisplay) return;
+        const shortId = id && id !== 'new' ? id.substring(0, 8) + '...' : 'new';
+        this.elements.sessionIdDisplay.textContent = shortId;
+        this.elements.sessionIdDisplay.title = id ? `Session ID: ${id}` : 'New session';
+    }
+
+    async restoreSessionHistory(sessionId) {
+        try {
+            const resp = await fetch(`${API_BASE}/sessions/${sessionId}`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.messages && data.messages.length > 0) {
+                this.elements.initialState.hidden = true;
+                // Group pairs of user + assistant
+                for (let i = 0; i < data.messages.length; i += 2) {
+                    const userMsg = data.messages[i];
+                    const assistMsg = data.messages[i + 1];
+                    if (userMsg && userMsg.role === 'user') {
+                        this.renderHistoricalTurn(userMsg.content, assistMsg ? assistMsg.content : '');
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    renderHistoricalTurn(question, answer) {
+        const turnDiv = document.createElement('div');
+        turnDiv.className = 'chat-turn';
+
+        const userBubble = document.createElement('div');
+        userBubble.className = 'user-message';
+        userBubble.textContent = question;
+
+        const assistBubble = document.createElement('div');
+        assistBubble.className = 'assistant-message';
+        assistBubble.innerHTML = `
+            <div class="assistant-message-header">
+                <span class="assistant-badge">🔬 Research Assistant</span>
+            </div>
+            <div class="assistant-body">${this.formatMarkdown(answer)}</div>
+        `;
+
+        turnDiv.appendChild(userBubble);
+        turnDiv.appendChild(assistBubble);
+        this.elements.chatThread.appendChild(turnDiv);
     }
 
     // ── Event Listeners ──────────────────────────────────────────────────────
@@ -86,6 +145,36 @@ class ResearchLensApp {
                 this.askQuestion();
             }
         });
+
+        // New Chat button click
+        if (this.elements.newChatBtn) {
+            this.elements.newChatBtn.addEventListener('click', () => {
+                this.startNewChat();
+            });
+        }
+    }
+
+    async startNewChat() {
+        try {
+            const resp = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
+            if (resp.ok) {
+                const data = await resp.json();
+                this.sessionId = data.session_id;
+                localStorage.setItem('researchlens_session_id', this.sessionId);
+                this.updateSessionDisplay(this.sessionId);
+            }
+        } catch (_) {
+            this.sessionId = null;
+            localStorage.removeItem('researchlens_session_id');
+            this.updateSessionDisplay('new');
+        }
+
+        // Clear UI thread
+        this.elements.chatThread.innerHTML = '';
+        this.elements.initialState.hidden = false;
+        this.elements.questionInput.value = '';
+        this.elements.askBtn.disabled = true;
+        this.showToast('Started a new conversation session.', 'info');
     }
 
     // ── Drag and Drop ────────────────────────────────────────────────────────
@@ -110,81 +199,19 @@ class ResearchLensApp {
         });
 
         zone.addEventListener('drop', (e) => {
-            const dt = e.dataTransfer;
-            const file = dt.files[0];
-            if (file) {
-                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
                     this.uploadDocument(file);
                 } else {
-                    this.showToast('Please upload a PDF document (.pdf)', 'error');
+                    this.showToast('Please upload a PDF file.', 'error');
                 }
             }
         });
     }
 
-    // ── Document Ingestion ───────────────────────────────────────────────────
-
-    async uploadDocument(file) {
-        if (!file.name.toLowerCase().endsWith('.pdf')) {
-            this.showToast('Invalid file format. Only PDF files are supported.', 'error');
-            return;
-        }
-
-        const maxSizeMb = 50;
-        if (file.size > maxSizeMb * 1024 * 1024) {
-            this.showToast(`File size exceeds maximum limit of ${maxSizeMb} MB.`, 'error');
-            return;
-        }
-
-        // Show progress UI
-        this.elements.uploadProgress.hidden = false;
-        this.elements.progressFill.style.width = '30%';
-        this.elements.progressText.textContent = `Uploading ${file.name}...`;
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        try {
-            this.elements.progressFill.style.width = '60%';
-            this.elements.progressText.textContent = 'Processing and embedding chunks...';
-
-            const response = await fetch(`${API_BASE}/ingest`, {
-                method: 'POST',
-                body: formData,
-            });
-
-            this.elements.progressFill.style.width = '100%';
-
-            if (!response.ok) {
-                let errorDetail = 'Ingestion failed';
-                try {
-                    const err = await response.json();
-                    errorDetail = err.detail || err.message || errorDetail;
-                } catch (_) {}
-                throw new Error(errorDetail);
-            }
-
-            const data = await response.json();
-            this.showToast(`Successfully ingested "${data.filename}" (${data.total_chunks} chunks, ${data.total_pages} pages)`, 'success');
-
-            // Reset upload file input
-            this.elements.fileInput.value = '';
-
-            // Refresh document list and health
-            await this.loadDocuments();
-            await this.checkHealth();
-        } catch (error) {
-            this.showToast(`Error: ${error.message}`, 'error');
-        } finally {
-            setTimeout(() => {
-                this.elements.uploadProgress.hidden = true;
-                this.elements.progressFill.style.width = '0%';
-                this.elements.progressText.textContent = 'Uploading...';
-            }, 1000);
-        }
-    }
-
-    // ── Document List & Management ───────────────────────────────────────────
+    // ── Document Management ──────────────────────────────────────────────────
 
     async loadDocuments() {
         try {
@@ -195,32 +222,101 @@ class ResearchLensApp {
             this.documents = data.documents || [];
             this.renderDocumentList();
             this.updateFilterDropdown();
+            this.updateDocCounts(this.documents.length);
         } catch (error) {
-            console.error('Failed to load documents:', error);
+            this.showToast(`Error loading documents: ${error.message}`, 'error');
+        }
+    }
+
+    async uploadDocument(file) {
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            this.showToast('Only PDF files are supported.', 'error');
+            return;
+        }
+
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        if (file.size > maxSize) {
+            this.showToast('File size exceeds the 50MB limit.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        this.showUploadProgress(true, 'Uploading and processing PDF...');
+
+        try {
+            const response = await fetch(`${API_BASE}/ingest`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) {
+                let errorMsg = 'Upload failed';
+                try {
+                    const err = await response.json();
+                    errorMsg = err.detail || errorMsg;
+                } catch (_) {}
+                throw new Error(errorMsg);
+            }
+
+            const result = await response.json();
+            this.showToast(result.message || 'Document ingested successfully!', 'success');
+
+            this.elements.fileInput.value = '';
+            await this.loadDocuments();
+            await this.checkHealth();
+        } catch (error) {
+            this.showToast(`Upload failed: ${error.message}`, 'error');
+        } finally {
+            this.showUploadProgress(false);
+        }
+    }
+
+    showUploadProgress(show, text = '') {
+        const progress = this.elements.uploadProgress;
+        const fill = this.elements.progressFill;
+        const label = this.elements.progressText;
+
+        if (show) {
+            progress.hidden = false;
+            label.textContent = text;
+            fill.style.width = '30%';
+            const timer = setInterval(() => {
+                const cur = parseInt(fill.style.width, 10);
+                if (cur < 85) {
+                    fill.style.width = `${cur + 15}%`;
+                } else {
+                    clearInterval(timer);
+                }
+            }, 300);
+            progress._timer = timer;
+        } else {
+            if (progress._timer) clearInterval(progress._timer);
+            fill.style.width = '100%';
+            setTimeout(() => {
+                progress.hidden = true;
+                fill.style.width = '0%';
+            }, 400);
         }
     }
 
     renderDocumentList() {
         const list = this.elements.documentList;
-        const emptyState = this.elements.emptyDocState;
-        const count = this.documents.length;
+        const empty = this.elements.emptyDocState;
 
-        this.elements.docCount.textContent = `${count} ${count === 1 ? 'document' : 'documents'}`;
-
-        if (count === 0) {
-            list.innerHTML = '';
-            list.appendChild(emptyState);
-            emptyState.hidden = false;
+        if (this.documents.length === 0) {
+            empty.hidden = false;
+            list.querySelectorAll('.doc-card').forEach((el) => el.remove());
             return;
         }
 
-        emptyState.hidden = true;
-        list.innerHTML = '';
+        empty.hidden = true;
+        list.querySelectorAll('.doc-card').forEach((el) => el.remove());
 
         this.documents.forEach((doc) => {
             const item = document.createElement('div');
-            item.className = 'document-item';
-            item.dataset.id = doc.doc_id;
+            item.className = 'doc-card';
 
             const dateStr = doc.ingested_at
                 ? new Date(doc.ingested_at).toLocaleDateString(undefined, {
@@ -233,13 +329,16 @@ class ResearchLensApp {
 
             item.innerHTML = `
                 <div class="doc-info">
-                    <span class="doc-title" title="${this.escapeHtml(doc.filename)}">${this.escapeHtml(doc.filename)}</span>
-                    <span class="doc-meta">${doc.total_pages} pages · ${doc.total_chunks} chunks · ${dateStr}</span>
+                    <span class="doc-name" title="${this.escapeHtml(doc.filename)}">${this.escapeHtml(doc.filename)}</span>
+                    <span class="doc-meta">
+                        <span>📄 ${doc.total_pages} pages</span>
+                        <span>🧩 ${doc.total_chunks} chunks</span>
+                        <span>🕒 ${dateStr}</span>
+                    </span>
                 </div>
                 <button class="doc-delete-btn" title="Delete document" data-id="${doc.doc_id}">🗑</button>
             `;
 
-            // Delete event handler
             const deleteBtn = item.querySelector('.doc-delete-btn');
             deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -259,11 +358,11 @@ class ResearchLensApp {
         this.documents.forEach((doc) => {
             const option = document.createElement('option');
             option.value = doc.doc_id;
-            option.textContent = doc.filename.length > 30 ? doc.filename.substring(0, 27) + '...' : doc.filename;
+            option.textContent =
+                doc.filename.length > 30 ? doc.filename.substring(0, 27) + '...' : doc.filename;
             select.appendChild(option);
         });
 
-        // Restore previous selection if still available
         if (this.documents.some((d) => d.doc_id === currentVal)) {
             select.value = currentVal;
         } else {
@@ -294,7 +393,7 @@ class ResearchLensApp {
         }
     }
 
-    // ── Q&A Query Execution ──────────────────────────────────────────────────
+    // ── Q&A Query Execution (Streaming & History) ───────────────────────────
 
     async askQuestion() {
         const question = this.elements.questionInput.value.trim();
@@ -304,119 +403,198 @@ class ResearchLensApp {
         }
 
         const docId = this.elements.docFilter.value || null;
+        const retrievalMode = this.elements.retrievalModeSelect?.value || 'hybrid';
+        const isStreaming = this.elements.streamToggle?.checked ?? true;
 
         this.setProcessing(true);
-
-        // Hide initial state, show loading spinner
+        this.elements.questionInput.value = '';
         this.elements.initialState.hidden = true;
-        this.elements.answerContainer.hidden = true;
-        this.elements.loadingState.hidden = false;
 
-        try {
-            const retrievalMode = document.getElementById('retrievalModeSelect')?.value || 'hybrid';
-            const payload = {
-                question: question,
-                doc_id: docId,
-                top_k: 5,
-                retrieval_mode: retrievalMode,
-            };
+        // Create UI Turn in Chat Thread
+        const turnDiv = document.createElement('div');
+        turnDiv.className = 'chat-turn';
 
-            const response = await fetch(`${API_BASE}/query`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
+        const userBubble = document.createElement('div');
+        userBubble.className = 'user-message';
+        userBubble.textContent = question;
 
-            if (!response.ok) {
-                let errorMsg = 'Failed to answer question';
-                try {
-                    const err = await response.json();
-                    errorMsg = err.detail || errorMsg;
-                } catch (_) {}
-                throw new Error(errorMsg);
+        const assistBubble = document.createElement('div');
+        assistBubble.className = 'assistant-message';
+        assistBubble.innerHTML = `
+            <div class="assistant-message-header">
+                <span class="assistant-badge">🔬 Research Assistant</span>
+            </div>
+            <div class="assistant-body"><span class="typing-cursor"></span></div>
+            <div class="turn-sources" hidden>
+                <details>
+                    <summary>📚 Referenced Sources (<span class="sources-count">0</span>)</summary>
+                    <div class="sources-list"></div>
+                </details>
+            </div>
+            <div class="turn-meta" hidden>
+                <span class="meta-time"></span>
+            </div>
+        `;
+
+        turnDiv.appendChild(userBubble);
+        turnDiv.appendChild(assistBubble);
+        this.elements.chatThread.appendChild(turnDiv);
+        turnDiv.scrollIntoView({ behavior: 'smooth' });
+
+        const bodyDiv = assistBubble.querySelector('.assistant-body');
+        const sourcesContainer = assistBubble.querySelector('.turn-sources');
+        const sourcesCount = assistBubble.querySelector('.sources-count');
+        const sourcesList = assistBubble.querySelector('.sources-list');
+        const metaDiv = assistBubble.querySelector('.turn-meta');
+        const metaTime = assistBubble.querySelector('.meta-time');
+
+        const payload = {
+            question: question,
+            doc_id: docId,
+            top_k: 3,
+            retrieval_mode: retrievalMode,
+            session_id: this.sessionId,
+        };
+
+        if (isStreaming) {
+            try {
+                const response = await fetch(`${API_BASE}/query/stream`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Streaming failed with HTTP ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                let accumulatedText = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop(); // keep last incomplete chunk
+
+                    for (const rawEvent of lines) {
+                        const trimmed = rawEvent.trim();
+                        if (!trimmed.startsWith('data: ')) continue;
+                        const dataStr = trimmed.substring(6);
+
+                        try {
+                            const event = JSON.parse(dataStr);
+                            if (event.type === 'sources') {
+                                if (event.session_id) {
+                                    this.sessionId = event.session_id;
+                                    localStorage.setItem('researchlens_session_id', this.sessionId);
+                                    this.updateSessionDisplay(this.sessionId);
+                                }
+                                if (event.sources && event.sources.length > 0) {
+                                    this.renderTurnSources(event.sources, sourcesContainer, sourcesCount, sourcesList);
+                                }
+                            } else if (event.type === 'token') {
+                                accumulatedText += event.delta;
+                                bodyDiv.innerHTML = this.formatMarkdown(accumulatedText) + '<span class="typing-cursor"></span>';
+                            } else if (event.type === 'done') {
+                                accumulatedText = event.answer || accumulatedText;
+                                bodyDiv.innerHTML = this.formatMarkdown(accumulatedText);
+                                if (event.processing_time_ms) {
+                                    metaDiv.hidden = false;
+                                    metaTime.textContent = `⏱ Processed in ${event.processing_time_ms} ms`;
+                                }
+                            } else if (event.type === 'error') {
+                                bodyDiv.innerHTML = `<span style="color:var(--color-error)">Error: ${this.escapeHtml(event.error)}</span>`;
+                            }
+                        } catch (err) {
+                            console.error('Failed to parse SSE event', err);
+                        }
+                    }
+                    turnDiv.scrollIntoView({ behavior: 'smooth' });
+                }
+            } catch (err) {
+                bodyDiv.innerHTML = `<span style="color:var(--color-error)">Streaming query failed: ${this.escapeHtml(err.message)}</span>`;
+                this.showToast(`Query error: ${err.message}`, 'error');
+            } finally {
+                this.setProcessing(false);
             }
-
-            const data = await response.json();
-            this.renderAnswer(data);
-        } catch (error) {
-            this.showToast(`Query failed: ${error.message}`, 'error');
-            this.elements.loadingState.hidden = true;
-            this.elements.initialState.hidden = false;
-        } finally {
-            this.setProcessing(false);
-        }
-    }
-
-    renderAnswer(data) {
-        this.elements.loadingState.hidden = true;
-        this.elements.answerContainer.hidden = false;
-
-        // 1. Format and display answer
-        const formattedAnswer = this.formatMarkdown(data.answer);
-        this.elements.answerBody.innerHTML = formattedAnswer;
-
-        // 2. Render source documents
-        const sources = data.sources || [];
-        if (sources.length > 0) {
-            this.elements.sourcesSection.hidden = false;
-            this.elements.sourcesList.innerHTML = '';
-
-            sources.forEach((source, index) => {
-                const card = document.createElement('div');
-                card.className = 'source-card';
-
-                const scorePercent = Math.round(source.relevance_score * 100);
-                const scoreClass = scorePercent >= 70 ? 'score-high' : scorePercent >= 40 ? 'score-med' : 'score-low';
-
-                const channelBadge = source.retrieval_method
-                    ? `<span class="source-channel-badge">${this.escapeHtml(source.retrieval_method)}</span>`
-                    : '';
-
-                card.innerHTML = `
-                    <div class="source-card-header">
-                        <span class="source-tag">Source ${index + 1}</span>
-                        <span class="source-doc-name" title="${this.escapeHtml(source.filename)}">${this.escapeHtml(source.filename)}</span>
-                        <span class="source-page">Page ${source.page_number}</span>
-                        ${channelBadge}
-                        <span class="source-score ${scoreClass}">${scorePercent}% match</span>
-                    </div>
-                    <div class="source-content">${this.escapeHtml(source.content)}</div>
-                `;
-                this.elements.sourcesList.appendChild(card);
-            });
         } else {
-            this.elements.sourcesSection.hidden = true;
+            // Non-streaming fallback
+            try {
+                const response = await fetch(`${API_BASE}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Query failed');
+                }
+
+                const data = await response.json();
+                if (data.session_id) {
+                    this.sessionId = data.session_id;
+                    localStorage.setItem('researchlens_session_id', this.sessionId);
+                    this.updateSessionDisplay(this.sessionId);
+                }
+
+                bodyDiv.innerHTML = this.formatMarkdown(data.answer);
+                if (data.sources && data.sources.length > 0) {
+                    this.renderTurnSources(data.sources, sourcesContainer, sourcesCount, sourcesList);
+                }
+                if (data.processing_time_ms) {
+                    metaDiv.hidden = false;
+                    metaTime.textContent = `⏱ Response time: ${data.processing_time_ms} ms`;
+                }
+            } catch (err) {
+                bodyDiv.innerHTML = `<span style="color:var(--color-error)">Query failed: ${this.escapeHtml(err.message)}</span>`;
+                this.showToast(`Query error: ${err.message}`, 'error');
+            } finally {
+                this.setProcessing(false);
+            }
         }
-
-        // 3. Render metadata bar
-        this.elements.metadataBar.hidden = false;
-
-        const timeSpan = this.elements.metaTime.querySelector('.meta-value');
-        const formattedTime =
-            data.processing_time_ms >= 1000
-                ? `${(data.processing_time_ms / 1000).toFixed(2)}s`
-                : `${Math.round(data.processing_time_ms)}ms`;
-        timeSpan.textContent = `Response time: ${formattedTime}`;
-
-        const tokenSpan = this.elements.metaTokens.querySelector('.meta-value');
-        if (data.tokens_used && data.tokens_used.total_tokens) {
-            this.elements.metaTokens.hidden = false;
-            tokenSpan.textContent = `Tokens: ${data.tokens_used.total_tokens} (prompt: ${data.tokens_used.prompt_tokens}, completion: ${data.tokens_used.completion_tokens})`;
-        } else {
-            this.elements.metaTokens.hidden = true;
-        }
-
-        // Scroll to response smoothly
-        this.elements.responseArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    setProcessing(processing) {
-        this.isProcessing = processing;
-        this.elements.askBtn.disabled = processing || this.elements.questionInput.value.trim().length < 3;
-        this.elements.questionInput.disabled = processing;
+    renderTurnSources(sources, container, countSpan, listContainer) {
+        container.hidden = false;
+        countSpan.textContent = sources.length;
+        listContainer.innerHTML = '';
+
+        sources.forEach((src, idx) => {
+            const card = document.createElement('div');
+            card.className = 'source-card';
+
+            const score = src.rerank_score ?? src.relevance_score;
+            const scorePercent = Math.round(score * 100);
+            const scoreClass =
+                scorePercent >= 70 ? 'score-high' : scorePercent >= 40 ? 'score-med' : 'score-low';
+
+            const methodBadge = src.rerank_score !== null && src.rerank_score !== undefined
+                ? `<span class="source-channel-badge">⚡ Reranked (${(src.rerank_score).toFixed(2)})</span>`
+                : src.retrieval_method
+                ? `<span class="source-channel-badge">${this.escapeHtml(src.retrieval_method)}</span>`
+                : '';
+
+            card.innerHTML = `
+                <div class="source-card-header">
+                    <span class="source-tag">Source ${idx + 1}</span>
+                    <span class="source-doc-name" title="${this.escapeHtml(src.filename)}">${this.escapeHtml(src.filename)}</span>
+                    <span class="source-page">Page ${src.page_number}</span>
+                    ${methodBadge}
+                    <span class="source-score ${scoreClass}">${scorePercent}% match</span>
+                </div>
+                <div class="source-content">${this.escapeHtml(src.content)}</div>
+            `;
+            listContainer.appendChild(card);
+        });
     }
 
-    // ── System Health ────────────────────────────────────────────────────────
+    // ── Health & UI State ────────────────────────────────────────────────────
 
     async checkHealth() {
         try {
@@ -424,66 +602,45 @@ class ResearchLensApp {
             if (response.ok) {
                 const data = await response.json();
                 this.elements.statusIndicator.className = 'status-indicator status-online';
-                this.elements.statusText.textContent = `System Online · v${data.version}`;
-                this.elements.statusDocCount.textContent = `${data.documents_count} documents (${data.chunks_count} chunks indexed)`;
+                this.elements.statusText.textContent = `Connected (v${data.version})`;
+                this.elements.statusDocCount.textContent = `${data.documents_count} documents indexed (${data.chunks_count} chunks)`;
             } else {
-                throw new Error('Unhealthy status');
+                throw new Error('Unhealthy');
             }
         } catch (_) {
             this.elements.statusIndicator.className = 'status-indicator status-offline';
-            this.elements.statusText.textContent = 'Backend Offline';
-            this.elements.statusDocCount.textContent = 'Unable to connect to server';
+            this.elements.statusText.textContent = 'Disconnected';
+            this.elements.statusDocCount.textContent = 'Backend offline';
         }
     }
 
-    // ── Formatting & Utilities ───────────────────────────────────────────────
+    setProcessing(processing) {
+        this.isProcessing = processing;
+        this.elements.askBtn.disabled = processing || this.elements.questionInput.value.trim().length < 3;
+        if (processing) {
+            this.elements.askBtn.classList.add('loading');
+        } else {
+            this.elements.askBtn.classList.remove('loading');
+        }
+    }
 
-    formatMarkdown(text) {
-        if (!text) return '';
+    updateDocCounts(count) {
+        const text = count === 1 ? '1 document' : `${count} documents`;
+        this.elements.docCount.textContent = text;
+    }
 
-        let html = this.escapeHtml(text);
+    showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
 
-        // Highlight source citations like [Source 1], [Source 2]
-        html = html.replace(/\[Source\s*(\d+)\]/gi, '<span class="citation-badge">Source $1</span>');
+        this.elements.toastContainer.appendChild(toast);
+        setTimeout(() => toast.classList.add('show'), 10);
 
-        // Bold **text**
-        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-        // Italic *text*
-        html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-
-        // Code blocks ```code```
-        html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-
-        // Inline code `code`
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-        // Headers ### Header
-        html = html.replace(/^### (.*$)/gim, '<h4>$1</h4>');
-        html = html.replace(/^## (.*$)/gim, '<h3>$1</h3>');
-        html = html.replace(/^# (.*$)/gim, '<h2>$1</h2>');
-
-        // Bullet lists
-        html = html.replace(/^\s*[-*]\s+(.*)$/gim, '<li>$1</li>');
-        html = html.replace(/(<li>.*<\/li>)/gms, '<ul>$1</ul>');
-        html = html.replace(/<\/ul>\s*<ul>/g, '');
-
-        // Numbered lists
-        html = html.replace(/^\s*\d+\.\s+(.*)$/gim, '<li>$1</li>');
-
-        // Paragraphs (double newlines)
-        const paragraphs = html.split(/\n\n+/);
-        html = paragraphs
-            .map((p) => {
-                p = p.trim();
-                if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<pre') || p.startsWith('<li')) {
-                    return p;
-                }
-                return p ? `<p>${p.replace(/\n/g, '<br>')}</p>` : '';
-            })
-            .join('');
-
-        return html;
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3500);
     }
 
     escapeHtml(str) {
@@ -493,27 +650,26 @@ class ResearchLensApp {
         return div.innerHTML;
     }
 
-    showToast(message, type = 'info') {
-        const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
+    formatMarkdown(text) {
+        if (!text) return '';
+        let html = this.escapeHtml(text);
 
-        const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
+        // Bold
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        // Italic
+        html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        // Inline code
+        html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+        // Source citations
+        html = html.replace(
+            /\[Source (\d+)\]/g,
+            '<span class="source-citation" title="Citation: Source $1">[Source $1]</span>'
+        );
+        // Line breaks & paragraphs
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = html.replace(/\n/g, '<br>');
 
-        toast.innerHTML = `
-            <span class="toast-icon">${icon}</span>
-            <span class="toast-message">${this.escapeHtml(message)}</span>
-        `;
-
-        this.elements.toastContainer.appendChild(toast);
-
-        // Animate in
-        requestAnimationFrame(() => toast.classList.add('toast-show'));
-
-        // Auto remove
-        setTimeout(() => {
-            toast.classList.remove('toast-show');
-            setTimeout(() => toast.remove(), 300);
-        }, 4000);
+        return `<p>${html}</p>`;
     }
 }
 

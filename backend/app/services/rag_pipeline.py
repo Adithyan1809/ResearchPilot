@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterator, List, Optional
 
 try:
     from langsmith import traceable
@@ -25,12 +25,16 @@ except ImportError:
 from backend.app import __version__
 from backend.app.config import Settings
 from backend.app.models.schemas import (
+    ChatMessage,
     DocumentInfo,
     DocumentListResponse,
     HealthResponse,
     IngestResponse,
     QueryRequest,
     QueryResponse,
+    SessionInfo,
+    SessionResponse,
+    SourceDocument,
     TokenUsage,
 )
 from backend.app.services.document_processor import DocumentProcessor
@@ -38,6 +42,7 @@ from backend.app.services.embedding_service import EmbeddingService
 from backend.app.services.generator import GeneratorService
 from backend.app.services.reranker import RerankerService
 from backend.app.services.retriever import RetrieverService
+from backend.app.services.session_manager import SessionManagerService
 from backend.app.services.vector_store import VectorStoreService
 from backend.app.utils.logger import setup_logger
 
@@ -68,6 +73,7 @@ class RAGPipeline:
         self._retriever = RetrieverService(self._vector_store, settings)
         self._reranker = RerankerService(settings)
         self._generator = GeneratorService(settings)
+        self._session_manager = SessionManagerService()
 
         # Document registry path
         self._registry_path = os.path.join("data", _REGISTRY_FILENAME)
@@ -84,6 +90,26 @@ class RAGPipeline:
     def reranker(self, service: RerankerService) -> None:
         """Set the reranker service (useful for test mocking)."""
         self._reranker = service
+
+    @property
+    def generator(self) -> GeneratorService:
+        """Return the generator service."""
+        return self._generator
+
+    @generator.setter
+    def generator(self, service: GeneratorService) -> None:
+        """Set the generator service (useful for test mocking)."""
+        self._generator = service
+
+    @property
+    def session_manager(self) -> SessionManagerService:
+        """Return the conversational session manager."""
+        return self._session_manager
+
+    @session_manager.setter
+    def session_manager(self, service: SessionManagerService) -> None:
+        """Set the conversational session manager."""
+        self._session_manager = service
 
     # ── Registry helpers ─────────────────────────────────────────────────
 
@@ -201,6 +227,30 @@ class RAGPipeline:
             logger.exception("Failed to ingest document: %s", filename)
             raise
 
+    def _retrieve_and_rerank(self, request: QueryRequest) -> List[SourceDocument]:
+        """Perform Two-Stage Retrieval (Hybrid RRF candidates -> Cross-Encoder reranking)."""
+        if getattr(self._settings, "reranker_enabled", True):
+            candidates_k = getattr(self._settings, "reranker_candidates_k", 15)
+            candidates = self._retriever.retrieve(
+                query=request.question,
+                top_k=candidates_k,
+                doc_id=request.doc_id,
+                retrieval_mode=request.retrieval_mode,
+            )
+            target_top_k = request.top_k or getattr(self._settings, "reranker_top_k", 3)
+            return self._reranker.rerank(
+                query=request.question,
+                candidates=candidates,
+                top_k=target_top_k,
+            )
+        else:
+            return self._retriever.retrieve(
+                query=request.question,
+                top_k=request.top_k or getattr(self._settings, "top_k", 5),
+                doc_id=request.doc_id,
+                retrieval_mode=request.retrieval_mode,
+            )
+
     @traceable(
         name="rag_query_pipeline",
         run_type="chain",
@@ -214,7 +264,7 @@ class RAGPipeline:
         ----------
         request:
             The query payload containing the question, optional doc filter,
-            and top_k.
+            session_id, chat_history, and top_k.
 
         Returns
         -------
@@ -225,36 +275,41 @@ class RAGPipeline:
         start = time.perf_counter()
 
         try:
-            # 1. Retrieve & Rerank (Two-Stage Retrieval)
-            if getattr(self._settings, "reranker_enabled", True):
-                candidates_k = getattr(self._settings, "reranker_candidates_k", 15)
-                candidates = self._retriever.retrieve(
-                    query=request.question,
-                    top_k=candidates_k,
-                    doc_id=request.doc_id,
-                    retrieval_mode=request.retrieval_mode,
-                )
-                target_top_k = request.top_k or getattr(self._settings, "reranker_top_k", 3)
-                sources = self._reranker.rerank(
-                    query=request.question,
-                    candidates=candidates,
-                    top_k=target_top_k,
-                )
-            else:
-                sources = self._retriever.retrieve(
-                    query=request.question,
-                    top_k=request.top_k or getattr(self._settings, "top_k", 5),
-                    doc_id=request.doc_id,
-                    retrieval_mode=request.retrieval_mode,
-                )
-
-            # 2. Generate
-            result = self._generator.generate(
-                question=request.question,
-                sources=sources,
+            # 1. Resolve session and chat history
+            session_id = request.session_id
+            chat_history: List[ChatMessage] = (
+                list(request.chat_history) if request.chat_history else []
             )
+            if session_id:
+                stored_history = self._session_manager.get_history(session_id)
+                if stored_history and not chat_history:
+                    chat_history = stored_history
+                elif not stored_history and chat_history:
+                    for msg in chat_history:
+                        self._session_manager.add_message(
+                            session_id, msg.role, msg.content
+                        )
+
+            # 2. Retrieve & Rerank (Two-Stage Retrieval)
+            sources = self._retrieve_and_rerank(request)
+
+            # 3. Generate
+            gen_kwargs = {
+                "question": request.question,
+                "sources": sources,
+            }
+            if chat_history:
+                gen_kwargs["chat_history"] = chat_history
+
+            result = self._generator.generate(**gen_kwargs)
 
             elapsed_ms = (time.perf_counter() - start) * 1000
+
+            # 4. Save turn to session if tracking conversation memory
+            if session_id:
+                self._session_manager.add_turn(
+                    session_id, request.question, result["answer"]
+                )
 
             tokens = result.get("tokens_used", {})
 
@@ -266,11 +321,129 @@ class RAGPipeline:
                 query=request.question,
                 processing_time_ms=round(elapsed_ms, 2),
                 tokens_used=TokenUsage(**tokens) if tokens else None,
+                session_id=session_id,
             )
 
         except Exception:
             logger.exception("Query processing failed")
             raise
+
+    @traceable(
+        name="rag_query_stream_pipeline",
+        run_type="chain",
+        metadata={"agent_id": "researchpilot", "agent_environment": "local"},
+        tags=["researchpilot", "local", "query", "streaming"],
+    )
+    def query_stream(self, request: QueryRequest):
+        """Answer a research question using real-time streaming Server-Sent Events (SSE).
+
+        Yields SSE formatted lines: ``data: <json>\\n\\n``.
+        """
+        logger.info("Processing streaming query: %s", request.question[:80])
+        start = time.perf_counter()
+
+        session_id = request.session_id or self._session_manager.create_session()
+        chat_history: List[ChatMessage] = (
+            list(request.chat_history) if request.chat_history else []
+        )
+        stored_history = self._session_manager.get_history(session_id)
+        if stored_history and not chat_history:
+            chat_history = stored_history
+        elif not stored_history and chat_history:
+            for msg in chat_history:
+                self._session_manager.add_message(
+                    session_id, msg.role, msg.content
+                )
+
+        try:
+            # 1. Retrieve & Rerank
+            sources = self._retrieve_and_rerank(request)
+
+            # Emit initial sources event
+            sources_payload = {
+                "type": "sources",
+                "session_id": session_id,
+                "query": request.question,
+                "sources": [s.model_dump() for s in sources],
+            }
+            yield f"data: {json.dumps(sources_payload)}\n\n"
+
+            # 2. Stream tokens from generator
+            full_answer_parts: List[str] = []
+            stream_kwargs = {
+                "question": request.question,
+                "sources": sources,
+            }
+            if chat_history:
+                stream_kwargs["chat_history"] = chat_history
+
+            for delta in self._generator.generate_stream(**stream_kwargs):
+                full_answer_parts.append(delta)
+                token_payload = {
+                    "type": "token",
+                    "session_id": session_id,
+                    "delta": delta,
+                }
+                yield f"data: {json.dumps(token_payload)}\n\n"
+
+            full_answer = "".join(full_answer_parts)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+
+            # 3. Record turn in session manager
+            self._session_manager.add_turn(
+                session_id, request.question, full_answer
+            )
+
+            # 4. Emit final done event
+            done_payload = {
+                "type": "done",
+                "session_id": session_id,
+                "answer": full_answer,
+                "processing_time_ms": round(elapsed_ms, 2),
+            }
+            yield f"data: {json.dumps(done_payload)}\n\n"
+
+        except Exception as exc:
+            logger.exception("Streaming query processing failed")
+            err_payload = {
+                "type": "error",
+                "session_id": session_id,
+                "error": str(exc),
+            }
+            yield f"data: {json.dumps(err_payload)}\n\n"
+
+    # ── Session Operations ───────────────────────────────────────────────
+
+    def create_session(self, session_id: Optional[str] = None) -> str:
+        """Create a new conversational session."""
+        return self._session_manager.create_session(session_id)
+
+    def get_session(self, session_id: str) -> SessionResponse:
+        """Retrieve full conversation history for a session."""
+        history = self._session_manager.get_history(session_id)
+        info = self._session_manager.get_session_info(session_id)
+        now = datetime.utcnow()
+        if not info:
+            return SessionResponse(
+                session_id=session_id,
+                messages=[],
+                created_at=now,
+                updated_at=now,
+            )
+        return SessionResponse(
+            session_id=session_id,
+            messages=history,
+            created_at=info.created_at,
+            updated_at=info.updated_at,
+        )
+
+    def clear_session(self, session_id: str) -> bool:
+        """Clear conversation history for a session."""
+        return self._session_manager.clear_session(session_id)
+
+    def list_sessions(self) -> List[SessionInfo]:
+        """List all active conversation sessions."""
+        return self._session_manager.list_sessions()
 
     def get_health(self) -> HealthResponse:
         """Return a system health snapshot.

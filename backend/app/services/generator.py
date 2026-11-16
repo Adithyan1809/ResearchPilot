@@ -1,10 +1,11 @@
 """Answer generation service using Google Gemini via LangChain.
 
 Takes retrieved source chunks, formats them into a carefully-engineered
-prompt, and invokes ``ChatGoogleGenerativeAI`` to produce a cited answer.
+prompt with conversational context, and invokes ``ChatGoogleGenerativeAI``
+to produce cited answers via either standard or real-time streaming interfaces.
 """
 
-from typing import Dict, List
+from typing import Dict, Iterator, List, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -18,7 +19,7 @@ except ImportError:
         return decorator
 
 from backend.app.config import Settings
-from backend.app.models.schemas import SourceDocument
+from backend.app.models.schemas import ChatMessage, SourceDocument
 from backend.app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -29,7 +30,8 @@ class GeneratorService:
 
     RAG_PROMPT_TEMPLATE: str = (
         "You are a rigorous research assistant specializing in academic paper analysis. "
-        "Your task is to answer the user's question using ONLY the provided source context.\n\n"
+        "Your task is to answer the user's question using the provided source context, "
+        "taking into account previous conversation turns when relevant.\n\n"
         "## Guidelines\n"
         "1. Base your answer exclusively on the source context below.\n"
         "2. Cite every claim using [Source N] notation (e.g., [Source 1], [Source 2]).\n"
@@ -37,7 +39,10 @@ class GeneratorService:
         "state: \"I don't have enough information in the provided sources to answer this completely.\"\n"
         "4. Do NOT fabricate information or use knowledge outside the provided context.\n"
         "5. Structure your answer clearly: use paragraphs, bullet points, or numbered lists where appropriate.\n"
-        "6. When multiple sources support the same point, cite all of them (e.g., [Source 1][Source 3]).\n\n"
+        "6. When multiple sources support the same point, cite all of them (e.g., [Source 1][Source 3]).\n"
+        "7. Maintain conversational continuity when referring to entities mentioned in the conversation history.\n\n"
+        "## Conversation History\n"
+        "{chat_history}\n\n"
         "## Source Context\n"
         "{context}\n\n"
         "## Question\n"
@@ -86,6 +91,23 @@ class GeneratorService:
             parts.append(f"{header}\n{src.content}")
         return "\n\n".join(parts)
 
+    @staticmethod
+    def _format_chat_history(chat_history: Optional[List[ChatMessage]]) -> str:
+        """Format chat message history into structured conversational turns."""
+        if not chat_history:
+            return "None (this is the start of the conversation)"
+        turns: List[str] = []
+        for msg in chat_history:
+            role_label = (
+                "User"
+                if msg.role == "user"
+                else "Assistant"
+                if msg.role == "assistant"
+                else "System"
+            )
+            turns.append(f"{role_label}: {msg.content}")
+        return "\n".join(turns)
+
     # ── Generation ───────────────────────────────────────────────────────
 
     @traceable(
@@ -98,8 +120,9 @@ class GeneratorService:
         self,
         question: str,
         sources: List[SourceDocument],
+        chat_history: Optional[List[ChatMessage]] = None,
     ) -> Dict:
-        """Generate an answer with citations from retrieved sources.
+        """Generate an answer with citations from retrieved sources and conversation history.
 
         Parameters
         ----------
@@ -107,6 +130,8 @@ class GeneratorService:
             The user's research question.
         sources:
             Retrieved and ranked source chunks.
+        chat_history:
+            Optional previous turns in the conversation.
 
         Returns
         -------
@@ -130,14 +155,22 @@ class GeneratorService:
             }
 
         context = self._format_context(sources)
+        formatted_history = self._format_chat_history(chat_history)
         logger.info(
-            "Generating answer for question (len=%d) with %d sources",
+            "Generating answer for question (len=%d) with %d sources and %d history turns",
             len(question),
             len(sources),
+            len(chat_history) if chat_history else 0,
         )
 
         chain = self._prompt | self._llm
-        response = chain.invoke({"context": context, "question": question})
+        response = chain.invoke(
+            {
+                "context": context,
+                "question": question,
+                "chat_history": formatted_history,
+            }
+        )
 
         # Extract token usage from the response metadata
         usage_metadata = getattr(response, "usage_metadata", None) or {}
@@ -168,3 +201,71 @@ class GeneratorService:
             "answer": answer,
             "tokens_used": tokens_used,
         }
+
+    @traceable(
+        name="answer_generation_stream",
+        run_type="chain",
+        metadata={"agent_id": "researchpilot", "agent_environment": "local"},
+        tags=["researchpilot", "local", "generation", "streaming"],
+    )
+    def generate_stream(
+        self,
+        question: str,
+        sources: List[SourceDocument],
+        chat_history: Optional[List[ChatMessage]] = None,
+    ) -> Iterator[str]:
+        """Stream generated answer tokens in real-time.
+
+        Parameters
+        ----------
+        question:
+            The user's research question.
+        sources:
+            Retrieved and ranked source chunks.
+        chat_history:
+            Optional previous turns in the conversation.
+
+        Yields
+        ------
+        str
+            Token fragments / text deltas as they are generated by the model.
+        """
+        if not sources:
+            logger.warning("generate_stream() called with no sources")
+            yield (
+                "I don't have enough information in the provided "
+                "sources to answer this question. Please ingest "
+                "relevant documents first."
+            )
+            return
+
+        context = self._format_context(sources)
+        formatted_history = self._format_chat_history(chat_history)
+        logger.info(
+            "Streaming answer for question (len=%d) with %d sources and %d history turns",
+            len(question),
+            len(sources),
+            len(chat_history) if chat_history else 0,
+        )
+
+        chain = self._prompt | self._llm
+        for chunk in chain.stream(
+            {
+                "context": context,
+                "question": question,
+                "chat_history": formatted_history,
+            }
+        ):
+            content = getattr(chunk, "content", chunk)
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and "text" in part:
+                        yield part["text"]
+                    elif isinstance(part, str):
+                        yield part
+                    else:
+                        yield str(part)
+            elif isinstance(content, str) and content:
+                yield content
+            elif hasattr(content, "text"):
+                yield content.text

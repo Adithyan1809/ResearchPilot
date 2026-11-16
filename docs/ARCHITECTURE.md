@@ -1,7 +1,7 @@
 # ResearchLens — System Architecture Specification
 
 > **System**: ResearchLens  
-> **Release**: Version 4.0.0 (Two-Stage Retrieval & Cross-Encoder Reranking)  
+> **Release**: Version 5.0.0 (Real-Time SSE Streaming & Multi-Turn Conversational Memory)  
 > **Status**: Production-Oriented Reference Architecture  
 
 ---
@@ -15,6 +15,8 @@ ResearchLens is a decoupled, layered research paper intelligence platform based 
 │                              CLIENT TIER                                    │
 │       Vanilla HTML5 / CSS3 / ES6 Single-Page Application (SPA)              │
 │       - Drag & Drop PDF Ingestion                                          │
+│       - Real-time SSE Token Streaming (Typewriter Display)                 │
+│       - Multi-Turn Conversational Chat Thread with Session Persistence     │
 │       - Real-time Citation Highlighting & Rerank Scores                    │
 │       - Document Filter & Latency / Token Telemetry                        │
 └──────────────────────────────────────┬──────────────────────────────────────┘

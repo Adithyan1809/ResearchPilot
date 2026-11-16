@@ -13,9 +13,9 @@
             <h1 class="header-title">
                 <span class="brand-icon">🔬</span>
                 ResearchLens
-                <span class="version-badge">v2.0 Hybrid</span>
+                <span class="version-badge">v5.0 Streaming & Memory</span>
             </h1>
-            <p class="header-subtitle">AI-Powered Research Paper Analysis</p>
+            <p class="header-subtitle">AI-Powered Research Paper Analysis with Two-Stage Retrieval & Conversational Memory</p>
         </div>
     </header>
 
@@ -59,10 +59,38 @@
         <!-- Right Panel: Q&A Interface -->
         <section class="panel panel-qa">
             <div class="panel-header">
-                <h2 class="panel-title">💬 Ask a Question</h2>
+                <h2 class="panel-title">💬 Research Assistant</h2>
+                <div class="panel-actions">
+                    <label class="stream-toggle-label" title="Enable real-time token streaming">
+                        <input type="checkbox" id="streamToggle" checked>
+                        <span>⚡ Stream</span>
+                    </label>
+                    <button id="newChatBtn" class="new-chat-btn" title="Clear conversation history and start fresh">
+                        <span>🔄 New Chat</span>
+                    </button>
+                </div>
             </div>
 
-            <!-- Query Input -->
+            <!-- Response / Chat Thread Area -->
+            <div class="response-area" id="responseArea">
+                <!-- Initial State -->
+                <div class="initial-state" id="initialState">
+                    <span class="initial-icon">🧠</span>
+                    <p class="initial-text">Ask a question to begin research analysis</p>
+                    <p class="initial-hint">Upload documents and ask questions with real-time streaming and multi-turn conversational context.</p>
+                </div>
+
+                <!-- Chat History Messages Container -->
+                <div class="chat-thread" id="chatThread"></div>
+
+                <!-- Loading Spinner / Status -->
+                <div class="loading-state" id="loadingState" hidden>
+                    <div class="spinner"></div>
+                    <p class="loading-text" id="loadingText">Retrieving & reranking papers...</p>
+                </div>
+            </div>
+
+            <!-- Query Input Section -->
             <div class="query-section">
                 <div class="query-controls">
                     <div class="control-item">
@@ -74,66 +102,28 @@
                     <div class="control-item">
                         <label for="retrievalModeSelect" class="filter-label">Strategy:</label>
                         <select id="retrievalModeSelect" class="filter-select">
-                            <option value="hybrid" selected>⚡ Hybrid (Dense + BM25 RRF)</option>
+                            <option value="hybrid" selected>⚡ Two-Stage Reranked (Hybrid + Reranker)</option>
                             <option value="dense">🔍 Dense Semantic Vector</option>
                             <option value="bm25">🔤 Sparse Lexical (BM25)</option>
                         </select>
+                    </div>
+                    <div class="control-item session-tag" id="sessionTag" title="Active conversation session">
+                        <span>💬 Session: <code id="sessionIdDisplay">new</code></span>
                     </div>
                 </div>
                 <div class="query-input-group">
                     <textarea
                         id="questionInput"
                         class="query-textarea"
-                        placeholder="Ask a question about your research papers..."
-                        rows="3"
+                        placeholder="Ask a question or follow-up in context (e.g. 'What was their optimizer?')..."
+                        rows="2"
                     ></textarea>
                     <button id="askBtn" class="ask-btn" disabled>
-                        <span class="ask-btn-text">Ask</span>
+                        <span class="ask-btn-text">Send</span>
                         <span class="ask-btn-icon">➜</span>
                     </button>
                 </div>
-                <p class="query-hint">Press <kbd>Enter</kbd> to submit · <kbd>Shift+Enter</kbd> for new line</p>
-            </div>
-
-            <!-- Response Area -->
-            <div class="response-area" id="responseArea">
-                <!-- Initial State -->
-                <div class="initial-state" id="initialState">
-                    <span class="initial-icon">🧠</span>
-                    <p class="initial-text">Ask a question to get started</p>
-                    <p class="initial-hint">Upload documents and ask questions to analyze your research papers</p>
-                </div>
-
-                <!-- Loading Spinner -->
-                <div class="loading-state" id="loadingState" hidden>
-                    <div class="spinner"></div>
-                    <p class="loading-text">Analyzing your question...</p>
-                </div>
-
-                <!-- Answer Display -->
-                <div class="answer-container" id="answerContainer" hidden>
-                    <!-- Answer Body -->
-                    <div class="answer-section">
-                        <h3 class="section-label">Answer</h3>
-                        <div class="answer-body" id="answerBody"></div>
-                    </div>
-
-                    <!-- Source Citations -->
-                    <div class="sources-section" id="sourcesSection" hidden>
-                        <h3 class="section-label">Sources</h3>
-                        <div class="sources-list" id="sourcesList"></div>
-                    </div>
-
-                    <!-- Processing Metadata -->
-                    <div class="metadata-bar" id="metadataBar" hidden>
-                        <span class="meta-item" id="metaTime">
-                            ⏱ <span class="meta-value"></span>
-                        </span>
-                        <span class="meta-item" id="metaTokens">
-                            🔤 <span class="meta-value"></span>
-                        </span>
-                    </div>
-                </div>
+                <p class="query-hint">Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line · Multi-turn memory active</p>
             </div>
         </section>
     </main>

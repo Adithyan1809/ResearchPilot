@@ -1,7 +1,7 @@
 # ResearchLens — Evaluation Framework & Methodology
 
 > **Component**: Evaluation & Observability Suite  
-> **System Version**: 4.0.0 (Two-Stage Retrieval & Cross-Encoder Reranking)  
+> **System Version**: 5.0.0 (Real-Time SSE Streaming & Multi-Turn Conversational Memory)  
 > **Last Updated**: 2026-11-16  
 
 ---
@@ -226,6 +226,18 @@ RERANKER_MODEL=gemini-2.0-flash      # Model used for joint cross-attention scor
   └── [Span: generate_answer] (Stage 3: Context Injection & Generation)
         ├── [Run: format_prompt] (ChatPromptTemplate with 3 chunks) -> ~1,300 tokens
         └── [Run: ChatGoogleGenerativeAI] (gemini-2.0-flash) -> 240 tokens (latency: 1,608ms)
+```
+
+
+#### Streaming & Multi-Turn Conversational Tracing Hierarchy (V5.0)
+```
+[Trace: rag_query_stream_pipeline]
+  ├── [Span: retrieve_context] (Stage 1: Hybrid RRF Candidate Generation)
+  ├── [Span: cross_encoder_rerank] (Stage 2: Cross-Encoder Joint Scoring)
+  └── [Span: answer_generation_stream] (Stage 3: Real-Time SSE Token Streaming)
+        ├── [SSE Event: sources] -> emitted instantaneously (TTFT: ~280ms)
+        ├── [Stream: ChatGoogleGenerativeAI.stream()] -> progressive token deltas
+        └── [SSE Event: done] -> full answer, token usage, and session persistence
 ```
 
 ### Trace Inspection Capabilities

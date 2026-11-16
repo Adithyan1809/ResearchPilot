@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.models.schemas import (
@@ -17,6 +18,9 @@ from app.models.schemas import (
     IngestResponse,
     QueryRequest,
     QueryResponse,
+    SessionInfo,
+    SessionListResponse,
+    SessionResponse,
 )
 from app.utils.logger import setup_logger
 
@@ -151,6 +155,99 @@ async def query_documents(request: Request, body: QueryRequest):
             status_code=500,
             detail=f"An error occurred while generating the answer: {exc}",
         ) from exc
+
+
+@router.post(
+    "/query/stream",
+    summary="Query the RAG pipeline with SSE streaming",
+    description="Submit a question and receive real-time Server-Sent Events (SSE) streaming tokens, sources, and timing.",
+)
+async def query_documents_stream(request: Request, body: QueryRequest):
+    """Run a streaming query against ingested documents via the RAG pipeline."""
+    pipeline = _get_pipeline(request)
+
+    logger.info(
+        "Streaming query received: '%s' (session_id=%s, top_k=%d)",
+        body.question,
+        body.session_id,
+        body.top_k,
+    )
+
+    try:
+        return StreamingResponse(
+            pipeline.query_stream(body),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Streaming query failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start streaming query: {exc}",
+        ) from exc
+
+
+# ── Conversational Sessions ──────────────────────────────────────────────────
+
+
+@router.post(
+    "/sessions",
+    summary="Create a new conversation session",
+    description="Create a unique session identifier for tracking multi-turn research conversations.",
+)
+async def create_session(request: Request):
+    """Create a new conversational session."""
+    pipeline = _get_pipeline(request)
+    session_id = pipeline.create_session()
+    return {"session_id": session_id, "message": "Session created successfully."}
+
+
+@router.get(
+    "/sessions",
+    response_model=SessionListResponse,
+    summary="List active conversation sessions",
+    description="Retrieve metadata for all currently tracked conversational sessions.",
+)
+async def list_sessions(request: Request):
+    """List all active conversational sessions."""
+    pipeline = _get_pipeline(request)
+    sessions = pipeline.list_sessions()
+    return SessionListResponse(sessions=sessions, total=len(sessions))
+
+
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionResponse,
+    summary="Get conversation session history",
+    description="Retrieve all user and assistant messages for a specific session.",
+)
+async def get_session(request: Request, session_id: str):
+    """Retrieve full message history for a session."""
+    pipeline = _get_pipeline(request)
+    return pipeline.get_session(session_id)
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    summary="Clear conversation session history",
+    description="Reset all message history for a conversational session.",
+)
+async def clear_session(request: Request, session_id: str):
+    """Clear conversation history for a session."""
+    pipeline = _get_pipeline(request)
+    success = pipeline.clear_session(session_id)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session with ID '{session_id}' not found.",
+        )
+    return {"session_id": session_id, "message": "Session history cleared successfully."}
 
 
 # ── Health ───────────────────────────────────────────────────────────────────

@@ -4,10 +4,54 @@ Every API boundary is defined here so that FastAPI auto-generates accurate
 OpenAPI documentation and validates payloads at the edge.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+
+# ── Chat & Conversational Models ─────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    """A single turn in a conversational exchange."""
+
+    role: str = Field(..., description="Message author role: 'user', 'assistant', or 'system'")
+    content: str = Field(..., description="Text content of the message")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="UTC timestamp of when the message was recorded",
+    )
+
+
+class SessionInfo(BaseModel):
+    """Summary of an active conversational session."""
+
+    session_id: str = Field(..., description="Unique session identifier")
+    message_count: int = Field(..., ge=0, description="Total messages in session history")
+    created_at: datetime = Field(..., description="UTC creation timestamp")
+    updated_at: datetime = Field(..., description="UTC last active timestamp")
+
+
+class SessionResponse(BaseModel):
+    """Detailed view of a session including full message history."""
+
+    session_id: str = Field(..., description="Unique session identifier")
+    messages: List[ChatMessage] = Field(
+        default_factory=list,
+        description="Chronological message history",
+    )
+    created_at: datetime = Field(..., description="UTC creation timestamp")
+    updated_at: datetime = Field(..., description="UTC last active timestamp")
+
+
+class SessionListResponse(BaseModel):
+    """List of all tracked active sessions."""
+
+    sessions: List[SessionInfo] = Field(
+        default_factory=list,
+        description="List of session summaries",
+    )
+    total: int = Field(..., ge=0, description="Total active sessions")
 
 
 # ── Document Metadata ────────────────────────────────────────────────────────
@@ -21,7 +65,7 @@ class DocumentMetadata(BaseModel):
     chunk_index: int = Field(..., ge=0, description="0-indexed chunk position within the page")
     total_pages: int = Field(..., ge=1, description="Total number of pages in the PDF")
     ingested_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="UTC timestamp of when the document was ingested",
     )
 
@@ -66,6 +110,14 @@ class QueryRequest(BaseModel):
     retrieval_mode: Optional[str] = Field(
         default=None,
         description="Retrieval strategy: 'hybrid' (default), 'dense', or 'bm25'",
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Optional session ID for conversational memory continuity",
+    )
+    chat_history: Optional[List[ChatMessage]] = Field(
+        default_factory=list,
+        description="Optional list of prior conversation turns for multi-turn reasoning",
     )
 
 
@@ -116,6 +168,10 @@ class QueryResponse(BaseModel):
     tokens_used: Optional[TokenUsage] = Field(
         default=None,
         description="Token usage breakdown if available",
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Active conversation session ID if tracking conversation memory",
     )
 
 
