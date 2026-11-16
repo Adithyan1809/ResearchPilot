@@ -44,6 +44,11 @@ class Settings(BaseSettings):
 
     # Retrieval
     top_k: int = 5
+    retrieval_mode: str = "hybrid"  # "hybrid" | "dense" | "bm25"
+    rrf_k: int = 60
+    hybrid_dense_weight: float = 1.0
+    hybrid_bm25_weight: float = 1.0
+    hybrid_candidate_multiplier: int = 2
 
     # ChromaDB Vector Store
     chroma_persist_dir: str = "./data/chroma_db"

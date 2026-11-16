@@ -82,11 +82,17 @@ The codebase enforces strict separation of concerns through modular services:
 - **Vector Storage**: ChromaDB (`PersistentClient`), embedded in-process with SQLite metadata backing and HNSW (Hierarchical Navigable Small World) index for fast approximate nearest neighbor (ANN) search.
 - **Partitioning**: Chunks are stored in a unified collection (`research_papers`) with metadata filters (`where={"doc_id": doc_id}`) enabling document-scoped querying.
 
-### 2.4 Retrieval Service (`backend/app/services/retriever.py`)
-- Executes cosine similarity search over vector embeddings.
-- Normalizes distance metrics into relevance scores in the range $[0.0, 1.0]$.
-- Maps raw database outputs to strongly-typed `SourceDocument` Pydantic models.
-- Measures and exposes retrieval latency telemetry.
+### 2.4 Hybrid Retrieval Service (`backend/app/services/retriever.py`) — *Updated in V2.0*
+- **Dual-Channel Retrieval**:
+  - **Dense Channel**: Cosine similarity search over Gemini dense embeddings (`models/gemini-embedding-001`) stored in ChromaDB, retrieving top-$2K$ semantic candidates.
+  - **Sparse Channel**: Lexical matching via `BM25Okapi` over tokenized chunk texts, retrieving top-$2K$ exact-keyword candidates.
+- **Reciprocal Rank Fusion (RRF)**:
+  - Fuses dense and lexical candidate lists without requiring score normalization:
+    $$\text{RRF Score}(d) = \sum_{m \in \{\text{dense}, \text{bm25}\}} \frac{w_m}{k_{rrf} + \text{rank}_m(d)}$$
+  - Uses standard smoothing constant $k_{rrf} = 60$.
+  - Assigns dual-boost ranking to chunks captured by both semantic similarity and exact keyword occurrence.
+- **Strategy Selection**: Dynamically configurable per query or via application settings (`hybrid`, `dense`, or `bm25`).
+- **Telemetry & Provenance**: Maps outputs to typed `SourceDocument` models with channel provenance tags (`hybrid_rrf (dense + bm25)`, `dense`, or `bm25`) and measures retrieval latency.
 
 ### 2.5 Generation Service (`backend/app/services/generator.py`)
 - Encapsulates interaction with `gemini-2.0-flash`.

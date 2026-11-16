@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to initialize RAG pipeline: %s", exc)
         raise
 
-    logger.info("🚀 ResearchLens V1.0.0 started — listening on %s:%s", settings.host, settings.port)
+    logger.info("🚀 ResearchLens V2.0.0 (Hybrid RRF) started — listening on %s:%s", settings.host, settings.port)
 
     yield
 
@@ -98,7 +98,7 @@ app = FastAPI(
         "for ingesting research papers and answering questions with cited sources. "
         "Powered by Google Gemini, LangChain, and ChromaDB."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",

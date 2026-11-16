@@ -213,11 +213,12 @@ class RAGPipeline:
         start = time.perf_counter()
 
         try:
-            # 1. Retrieve
+            # 1. Retrieve (Hybrid RRF / Dense / BM25)
             sources = self._retriever.retrieve(
                 query=request.question,
                 top_k=request.top_k,
                 doc_id=request.doc_id,
+                retrieval_mode=request.retrieval_mode,
             )
 
             # 2. Generate

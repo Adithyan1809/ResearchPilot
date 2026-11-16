@@ -303,8 +303,25 @@ body {
 .query-controls {
     display: flex;
     align-items: center;
-    gap: .5rem;
+    gap: 1.25rem;
     margin-bottom: .6rem;
+    flex-wrap: wrap;
+}
+
+.control-item {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.source-channel-badge {
+    font-size: .68rem;
+    font-weight: 600;
+    padding: .15rem .45rem;
+    border-radius: 4px;
+    background: #eef2ff;
+    color: #4f46e5;
+    border: 1px solid #c7d2fe;
 }
 
 .filter-label {

@@ -13,7 +13,7 @@
             <h1 class="header-title">
                 <span class="brand-icon">🔬</span>
                 ResearchLens
-                <span class="version-badge">v1.0</span>
+                <span class="version-badge">v2.0 Hybrid</span>
             </h1>
             <p class="header-subtitle">AI-Powered Research Paper Analysis</p>
         </div>
@@ -65,10 +65,20 @@
             <!-- Query Input -->
             <div class="query-section">
                 <div class="query-controls">
-                    <label for="docFilter" class="filter-label">Search in:</label>
-                    <select id="docFilter" class="filter-select">
-                        <option value="">All Documents</option>
-                    </select>
+                    <div class="control-item">
+                        <label for="docFilter" class="filter-label">Search in:</label>
+                        <select id="docFilter" class="filter-select">
+                            <option value="">All Documents</option>
+                        </select>
+                    </div>
+                    <div class="control-item">
+                        <label for="retrievalModeSelect" class="filter-label">Strategy:</label>
+                        <select id="retrievalModeSelect" class="filter-select">
+                            <option value="hybrid" selected>⚡ Hybrid (Dense + BM25 RRF)</option>
+                            <option value="dense">🔍 Dense Semantic Vector</option>
+                            <option value="bm25">🔤 Sparse Lexical (BM25)</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="query-input-group">
                     <textarea

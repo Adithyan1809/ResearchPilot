@@ -12,4 +12,4 @@ for _path in [_backend_dir, _root_dir]:
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

@@ -63,6 +63,10 @@ class QueryRequest(BaseModel):
         le=20,
         description="Number of source chunks to retrieve",
     )
+    retrieval_mode: Optional[str] = Field(
+        default=None,
+        description="Retrieval strategy: 'hybrid' (default), 'dense', or 'bm25'",
+    )
 
 
 class SourceDocument(BaseModel):
@@ -71,9 +75,17 @@ class SourceDocument(BaseModel):
     content: str = Field(..., description="Text content of the chunk")
     page_number: int = Field(..., ge=1, description="Page the chunk originates from")
     chunk_index: int = Field(..., ge=0, description="Chunk position index")
-    relevance_score: float = Field(..., description="Cosine similarity score (0-1)")
+    relevance_score: float = Field(..., description="Relevance or RRF score")
     doc_id: str = Field(..., description="Parent document identifier")
     filename: str = Field(..., description="Original filename of the source document")
+    retrieval_method: Optional[str] = Field(
+        default="hybrid_rrf",
+        description="Retrieval channel: 'hybrid_rrf', 'dense', or 'bm25'",
+    )
+    rrf_score: Optional[float] = Field(
+        default=None,
+        description="Reciprocal rank fusion score if hybrid retrieval was used",
+    )
 
 
 class TokenUsage(BaseModel):

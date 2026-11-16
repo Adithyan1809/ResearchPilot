@@ -313,10 +313,12 @@ class ResearchLensApp {
         this.elements.loadingState.hidden = false;
 
         try {
+            const retrievalMode = document.getElementById('retrievalModeSelect')?.value || 'hybrid';
             const payload = {
                 question: question,
                 doc_id: docId,
                 top_k: 5,
+                retrieval_mode: retrievalMode,
             };
 
             const response = await fetch(`${API_BASE}/query`, {
@@ -366,11 +368,16 @@ class ResearchLensApp {
                 const scorePercent = Math.round(source.relevance_score * 100);
                 const scoreClass = scorePercent >= 70 ? 'score-high' : scorePercent >= 40 ? 'score-med' : 'score-low';
 
+                const channelBadge = source.retrieval_method
+                    ? `<span class="source-channel-badge">${this.escapeHtml(source.retrieval_method)}</span>`
+                    : '';
+
                 card.innerHTML = `
                     <div class="source-card-header">
                         <span class="source-tag">Source ${index + 1}</span>
                         <span class="source-doc-name" title="${this.escapeHtml(source.filename)}">${this.escapeHtml(source.filename)}</span>
                         <span class="source-page">Page ${source.page_number}</span>
+                        ${channelBadge}
                         <span class="source-score ${scoreClass}">${scorePercent}% match</span>
                     </div>
                     <div class="source-content">${this.escapeHtml(source.content)}</div>

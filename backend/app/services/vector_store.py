@@ -159,6 +159,42 @@ class VectorStoreService:
         logger.debug("Search returned %d results", len(results))
         return results
 
+    def get_all_documents(self, filter_dict: Optional[Dict] = None) -> List[Document]:
+        """Retrieve all stored documents from ChromaDB, optionally filtered.
+
+        Used by the BM25 sparse lexical retriever to construct its inverted
+        index across chunks.
+
+        Parameters
+        ----------
+        filter_dict:
+            Optional metadata filter (e.g. ``{"doc_id": "..."}``).
+
+        Returns
+        -------
+        list[Document]
+            LangChain Document objects corresponding to stored chunks.
+        """
+        collection = self._store._collection  # noqa: SLF001
+        kwargs: Dict = {}
+        if filter_dict:
+            kwargs["where"] = filter_dict
+
+        raw = collection.get(**kwargs)
+        contents = raw.get("documents") or []
+        metadatas = raw.get("metadatas") or []
+
+        docs: List[Document] = []
+        for text, meta in zip(contents, metadatas):
+            docs.append(Document(page_content=text, metadata=meta or {}))
+
+        logger.debug(
+            "Retrieved %d raw documents for lexical indexing (filter=%s)",
+            len(docs),
+            filter_dict,
+        )
+        return docs
+
     # ── Collection introspection ─────────────────────────────────────────
 
     def get_document_count(self) -> int:

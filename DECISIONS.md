@@ -222,6 +222,7 @@ Each record follows the Architecture Decision Record (ADR) format:
 | DEC-009 | Frontend | Vanilla HTML/CSS/JS | Zero build complexity |
 | DEC-010 | Observability | LangSmith | Native LangChain integration |
 | DEC-011 | Agent Tracing & Skills | LangSmith Agent Routing | Dedicated Agent ID (`researchpilot`) & environment (`local`) |
+| DEC-012 | Retrieval Strategy | Hybrid Search (Dense + BM25) with RRF | Solves exact keyword blindspot; rank-based scale-invariant fusion |
 
 ---
 
@@ -243,16 +244,34 @@ Each record follows the Architecture Decision Record (ADR) format:
 
 ---
 
+## DEC-012: Hybrid Retrieval (Dense Vector + BM25 Lexical) with Reciprocal Rank Fusion (RRF)
+
+| Field | Detail |
+|---|---|
+| **Decision ID** | DEC-012 |
+| **Date** | 2026-11-16 |
+| **Problem** | In Version 1.0, dense-only semantic vector search exhibited noticeable blind spots for academic papers containing exact domain keywords, mathematical notation, acronyms (e.g. `BLEU`, `WMT 2014`), hyperparameters (e.g. `d_model=512`, `d_k=64`), and author names. How can we improve retrieval recall and precision without adding burdensome external infrastructure? |
+| **Selected Approach** | Implement **Hybrid Retrieval** combining **Dense Semantic Vector Search** (ChromaDB + Gemini Embeddings) with **Sparse Lexical Search** (BM25Okapi), fused via **Reciprocal Rank Fusion (RRF)** with constant $k=60$. |
+| **Alternatives Considered** | 1. **Linear Score Combination ($\alpha \cdot S_{dense} + (1-\alpha) \cdot S_{bm25}$)**: Rejected because cosine similarities are bounded $[0, 1]$ while BM25 scores are unbounded $[0, \infty)$, causing severe score calibration drift across queries of different lengths.<br>2. **Pure Cross-Encoder Reranker**: Powerful for re-ordering candidates, but cannot retrieve passages that the dense candidate generator missed entirely.<br>3. **External Elasticsearch / OpenSearch Cluster**: Unnecessary operational complexity for single-node / embedded research assistant workloads.<br>4. **LLM Query Expansion (Multi-Query / HyDE)**: Increases latency by 1.5–2.5 seconds and incurs extra LLM API cost before retrieval begins. |
+| **Reason** | RRF (Cormack, Clarke, and Büttcher, SIGIR 2009) is completely rank-based and scale-invariant. It requires no score normalization or calibration. BM25 catches exact keyword matches that dense vectors overlook, while dense vectors catch semantic synonyms that BM25 misses. When a document appears in both rankings, its reciprocal score is boosted significantly. |
+| **Advantages** | • Significant boost in Retrieval Recall@K and MRR on technical/academic queries<br>• Scale-invariant: no score distribution normalization required<br>• Zero external infrastructure dependencies (BM25 runs in-memory over the chunk collection)<br>• Negligible latency overhead (<10ms for BM25 and fusion computation)<br>• Fully configurable retrieval modes (`hybrid`, `dense`, `bm25`) for controlled ablation testing. |
+| **Disadvantages** | • In-memory BM25 index requires tokenizing chunks upon retrieval or maintaining an in-memory token cache<br>• Slightly higher memory footprint for the tokenized corpus. |
+| **Trade-offs** | We accept a minor in-memory compute overhead (<10ms) per query in exchange for eliminating semantic retrieval blind spots and improving context precision. |
+| **Impact** | `RetrieverService` refactored into a modular pipeline with `_dense_search`, `_bm25_search`, and `_reciprocal_rank_fusion`. API schemas and frontend updated to display retrieval mode and RRF scores. Evaluation benchmark updated with V2.0 hybrid comparison. |
+| **Reconsider When** | • Corpus size exceeds tens of millions of chunks, where an in-memory inverted index exceeds host RAM and requires distributed BM25 search (e.g. OpenSearch or Pinecone sparse-dense hybrid). |
+
+---
+
 ## Decision Dependencies
 
 ```
 DEC-001 (Gemini) ──────┐
-                        ├──→ DEC-002 (Embedding) ──→ DEC-003 (ChromaDB)
-DEC-007 (LangChain) ───┤                              ↓
-                        ├──→ DEC-010 / DEC-011     DEC-006 (Top-K)
-                        │    (LangSmith Agent)         ↓
-DEC-005 (PyMuPDF) ─────┤──→ DEC-004 (Chunking) ───→ [Ingestion Pipeline]
-                        │
+                        ├──→ DEC-002 (Embedding) ──→ DEC-003 (ChromaDB) ──┐
+DEC-007 (LangChain) ───┤                              ↓                   ├──→ DEC-012 (Hybrid RRF)
+                        ├──→ DEC-010 / DEC-011     DEC-006 (Top-K)        │          ↓
+                        │    (LangSmith Agent)         ↓                  │    [Retriever]
+DEC-005 (PyMuPDF) ─────┤──→ DEC-004 (Chunking) ───→ [Ingestion Pipeline] ─┘          ↓
+                        │                                                      [Generator]
 DEC-008 (FastAPI) ──────┤──→ DEC-009 (Frontend)
 ```
 
