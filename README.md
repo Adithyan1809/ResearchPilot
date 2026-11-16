@@ -34,7 +34,7 @@
   - Detects and preserves LaTeX mathematical blocks (`$$...$$`, `\[...\]`) and tables as atomic units with zero mid-equation splitting.
 
 - **🎯 Two-Stage Hybrid Retrieval & Reranking**:
-  - **Stage 1 (High Recall)**: Dual-channel retrieval fusing **Dense Semantic Vector Search** (Gemini embeddings) with **Sparse Lexical Search** (BM25Okapi) via **Reciprocal Rank Fusion (RRF, $k=60$)** over top-15 candidates.
+  - **Stage 1 (High Recall)**: Dual-channel retrieval fusing **Dense Semantic Vector Search** (Gemini embeddings) with **Sparse Lexical Search** (BM25Okapi) via **Reciprocal Rank Fusion (RRF, k=60)** over top-15 candidates.
   - **Stage 2 (High Precision)**: Cross-Encoder joint attention scoring via Gemini Flash (`temperature=0.0`) evaluates all 15 candidates down to the top-3 highest-signal chunks, reducing prompt token bloat by **~41%** and boosting Context Precision to **0.96**.
 
 - **⚡ Real-Time Server-Sent Events (SSE) Streaming**:
@@ -43,7 +43,7 @@
 
 - **💬 Multi-Turn Conversational Memory**:
   - Thread-safe sliding window session management (`SessionManagerService`) retaining recent conversation turns.
-  - Injects structured conversation history into generation prompts, achieving **94% coreference resolution** for natural follow-ups (*"What optimizer did they use?"* $\rightarrow$ *"What learning rate did they configure for it?"*).
+  - Injects structured conversation history into generation prompts, achieving **94% coreference resolution** for natural follow-ups (*"What optimizer did they use?"* → *"What learning rate did they configure for it?"*).
   - Full REST session lifecycle management (`POST/GET/DELETE /api/v1/sessions`).
 
 - **🔭 Enterprise Observability**:
@@ -58,29 +58,29 @@
 
 ```mermaid
 flowchart TD
-    User([Researcher / Client]) -->|PDF Upload| IngestAPI["POST /api/v1/ingest"]
-    User -->|Question + Session ID| StreamAPI["POST /api/v1/query/stream"]
+    User["Researcher / Client"] -->|"Upload PDF"| IngestAPI["POST /api/v1/ingest"]
+    User -->|"Question + Session ID"| StreamAPI["POST /api/v1/query/stream"]
 
-    subgraph Ingestion Pipeline
-        IngestAPI --> PyMuPDF[PyMuPDF Text Extraction]
-        PyMuPDF --> StructChunk[Structure-Aware Chunking<br/>Atomic Math & Breadcrumbs]
-        StructChunk --> GeminiEmb[Gemini Embeddings<br/>models/gemini-embedding-001]
-        GeminiEmb --> Chroma[Persistent ChromaDB Vector Store]
+    subgraph SubIngest ["Ingestion Pipeline"]
+        IngestAPI --> PyMuPDF["PyMuPDF Text Extraction"]
+        PyMuPDF --> StructChunk["Structure-Aware Chunking<br/>Atomic Math and Breadcrumbs"]
+        StructChunk --> GeminiEmb["Gemini Embeddings<br/>gemini-embedding-001"]
+        GeminiEmb --> Chroma["Persistent ChromaDB Vector Store"]
     end
 
-    subgraph Two-Stage Retrieval Engine
-        StreamAPI --> SessionMgr[Session Manager<br/>Thread-Safe Sliding Window]
-        SessionMgr --> Stage1[Stage 1: Hybrid Candidate Retrieval<br/>Dense Cosine + In-Memory BM25Okapi]
-        Stage1 --> RRF[Reciprocal Rank Fusion<br/>RRF k=60 -> Top-15 Pool]
-        RRF --> Stage2[Stage 2: Cross-Encoder Reranker<br/>Joint Attention Scoring -> Top-3]
+    subgraph SubRetrieval ["Two-Stage Retrieval Engine"]
+        StreamAPI --> SessionMgr["Session Manager<br/>Thread-Safe Sliding Window"]
+        SessionMgr --> Stage1["Stage 1: Hybrid Candidate Retrieval<br/>Dense Cosine + In-Memory BM25Okapi"]
+        Stage1 --> RRF["Reciprocal Rank Fusion<br/>RRF k=60 to Top-15 Pool"]
+        RRF --> Stage2["Stage 2: Cross-Encoder Reranker<br/>Joint Attention Scoring to Top-3"]
     end
 
-    subgraph Streaming & Generation
-        Stage2 --> InstantSources[SSE Event: sources<br/>Immediate Citation Cards]
-        Stage2 --> PromptBuilder[Prompt Formatter<br/>History + Top-3 Grounded Chunks]
-        PromptBuilder --> GeminiGen[Gemini 2.0 Flash<br/>Streaming Completion]
-        GeminiGen --> TokenStream[SSE Event: token<br/>Typewriter Rendering]
-        TokenStream --> DoneEvent[SSE Event: done<br/>Metrics & Turn Saved]
+    subgraph SubGeneration ["Streaming and Generation"]
+        Stage2 --> InstantSources["SSE Event: sources<br/>Immediate Citation Cards"]
+        Stage2 --> PromptBuilder["Prompt Formatter<br/>History + Top-3 Grounded Chunks"]
+        PromptBuilder --> GeminiGen["Gemini 2.0 Flash<br/>Streaming Completion"]
+        GeminiGen --> TokenStream["SSE Event: token<br/>Typewriter Rendering"]
+        TokenStream --> DoneEvent["SSE Event: done<br/>Metrics and Turn Saved"]
     end
 
     InstantSources --> User
