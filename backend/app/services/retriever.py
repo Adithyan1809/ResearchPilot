@@ -164,11 +164,15 @@ class RetrieverService:
         origin_channels: Dict[str, List[str]] = {}
 
         def _doc_key(doc: Document) -> str:
-            # Unique identifier combining doc_id and chunk_index or content hash
+            # Unique identifier combining doc_id, page_number, and chunk_index (or explicit chunk_id)
             meta = doc.metadata or {}
+            chunk_id = meta.get("chunk_id")
+            if chunk_id:
+                return str(chunk_id)
             doc_id = meta.get("doc_id", "unknown")
-            chunk_idx = meta.get("chunk_index", "0")
-            return f"{doc_id}:{chunk_idx}"
+            page_num = meta.get("page_number", 1)
+            chunk_idx = meta.get("chunk_index", 0)
+            return f"{doc_id}:p{page_num}:c{chunk_idx}"
 
         # 1. Process Dense Rankings
         for rank, (doc, _) in enumerate(dense_results, start=1):
@@ -194,11 +198,16 @@ class RetrieverService:
             channels = origin_channels.get(key, [])
             method_label = "hybrid_rrf (dense + bm25)" if len(channels) > 1 else channels[0]
 
+            chunk_id = doc.metadata.get("chunk_id") or key
+            section = doc.metadata.get("section") or doc.metadata.get("hierarchy")
+
             fused_sources.append(
                 SourceDocument(
                     content=doc.page_content,
                     page_number=doc.metadata.get("page_number", 1),
                     chunk_index=doc.metadata.get("chunk_index", 0),
+                    chunk_id=chunk_id,
+                    section=section,
                     relevance_score=round(float(fused_score), 4),
                     doc_id=doc.metadata.get("doc_id", ""),
                     filename=doc.metadata.get("filename", ""),
@@ -270,6 +279,8 @@ class RetrieverService:
                         content=doc.page_content,
                         page_number=doc.metadata.get("page_number", 1),
                         chunk_index=doc.metadata.get("chunk_index", 0),
+                        chunk_id=doc.metadata.get("chunk_id") or f"{doc.metadata.get('doc_id')}:p{doc.metadata.get('page_number', 1)}:c{doc.metadata.get('chunk_index', 0)}",
+                        section=doc.metadata.get("section") or doc.metadata.get("hierarchy"),
                         relevance_score=round(float(score), 4),
                         doc_id=doc.metadata.get("doc_id", ""),
                         filename=doc.metadata.get("filename", ""),
@@ -295,6 +306,8 @@ class RetrieverService:
                     content=doc.page_content,
                     page_number=doc.metadata.get("page_number", 1),
                     chunk_index=doc.metadata.get("chunk_index", 0),
+                    chunk_id=doc.metadata.get("chunk_id") or f"{doc.metadata.get('doc_id')}:p{doc.metadata.get('page_number', 1)}:c{doc.metadata.get('chunk_index', 0)}",
+                    section=doc.metadata.get("section") or doc.metadata.get("hierarchy"),
                     relevance_score=round(float(score), 4),
                     doc_id=doc.metadata.get("doc_id", ""),
                     filename=doc.metadata.get("filename", ""),
@@ -311,6 +324,8 @@ class RetrieverService:
                     content=doc.page_content,
                     page_number=doc.metadata.get("page_number", 1),
                     chunk_index=doc.metadata.get("chunk_index", 0),
+                    chunk_id=doc.metadata.get("chunk_id") or f"{doc.metadata.get('doc_id')}:p{doc.metadata.get('page_number', 1)}:c{doc.metadata.get('chunk_index', 0)}",
+                    section=doc.metadata.get("section") or doc.metadata.get("hierarchy"),
                     relevance_score=round(float(score), 4),
                     doc_id=doc.metadata.get("doc_id", ""),
                     filename=doc.metadata.get("filename", ""),

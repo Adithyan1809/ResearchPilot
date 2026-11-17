@@ -1,9 +1,15 @@
 {
-  "version": "1.0",
-  "description": "ResearchLens V1.0 Baseline Evaluation Benchmark Dataset",
-  "created_at": "2026-11-16",
+  "version": "1.1",
+  "description": "ResearchLens V1.1 Baseline Evaluation Benchmark Dataset with Passage-Level Ground Truth",
+  "created_at": "2026-11-17",
   "domain": "Machine Learning & Natural Language Processing",
   "reference_corpus": "Attention Is All You Need (Vaswani et al., 2017)",
+  "expected_filenames": [
+    "Attention_Is_All_You_Need.pdf",
+    "test_sample_paper.pdf",
+    "1706.03762.pdf",
+    "vaswani2017.pdf"
+  ],
   "questions": [
     {
       "id": "Q001",
@@ -11,7 +17,9 @@
       "difficulty": "easy",
       "question": "What is the primary architectural contribution of the Transformer model compared to earlier sequence transduction models?",
       "reference_answer": "The Transformer is the first sequence transduction model based entirely on self-attention mechanisms to compute representations of its input and output, completely dispensing with recurrence and convolutions like RNNs and CNNs.",
+      "expected_sections": ["1 Introduction", "Abstract"],
       "relevant_passage_keywords": ["Transformer", "attention", "recurrent", "convolution", "dispensing"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -20,7 +28,9 @@
       "difficulty": "medium",
       "question": "How is Scaled Dot-Product Attention mathematically defined, and why is the scaling factor sqrt(d_k) introduced?",
       "reference_answer": "Scaled Dot-Product Attention is computed as Attention(Q, K, V) = softmax(QK^T / sqrt(d_k))V. The scaling factor 1/sqrt(d_k) is introduced because for large values of d_k, the dot products grow large in magnitude, pushing the softmax function into regions with extremely small gradients.",
+      "expected_sections": ["3.2.1 Scaled Dot-Product Attention"],
       "relevant_passage_keywords": ["Scaled Dot-Product", "softmax", "d_k", "scaling factor", "gradients"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -29,7 +39,9 @@
       "difficulty": "medium",
       "question": "How does Multi-Head Attention work and what benefit does it provide over single attention?",
       "reference_answer": "Multi-Head Attention linearly projects queries, keys, and values h times with different, learned linear projections to d_k, d_k, and d_v dimensions, computes attention in parallel on each, and concatenates the results. It allows the model to jointly attend to information from different representation subspaces at different positions.",
+      "expected_sections": ["3.2.2 Multi-Head Attention"],
       "relevant_passage_keywords": ["Multi-Head Attention", "subspaces", "linearly project", "concatenate", "parallel"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -38,7 +50,9 @@
       "difficulty": "medium",
       "question": "How does the Transformer inject positional information since it contains no recurrence or convolution?",
       "reference_answer": "The Transformer uses Positional Encodings added to the input embeddings at the bottoms of the encoder and decoder stacks. It uses sine and cosine functions of different frequencies: PE(pos, 2i) = sin(pos / 10000^(2i/d_model)) and PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model)).",
+      "expected_sections": ["3.5 Positional Encoding"],
       "relevant_passage_keywords": ["Positional Encoding", "sine", "cosine", "frequencies", "order"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -47,7 +61,9 @@
       "difficulty": "easy",
       "question": "What BLEU scores did the Transformer achieve on the WMT 2014 English-to-German and English-to-French translation benchmarks?",
       "reference_answer": "On the WMT 2014 English-to-German translation task, the Transformer (big) achieved a BLEU score of 28.4, outperforming previous best models by over 2.0 BLEU. On the English-to-French task, it established a state-of-the-art BLEU score of 41.8.",
+      "expected_sections": ["5.1 Machine Translation", "Table 2"],
       "relevant_passage_keywords": ["BLEU", "WMT 2014", "English-to-German", "28.4", "English-to-French", "41.8"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -56,7 +72,9 @@
       "difficulty": "hard",
       "question": "Compare the computational complexity per layer of Self-Attention against Recurrent and Convolutional layers.",
       "reference_answer": "Self-attention has a per-layer complexity of O(n^2 * d) where n is sequence length and d is representation dimension, with O(1) sequential operations. Recurrent layers have O(n * d^2) complexity with O(n) sequential operations. Convolutional layers have O(k * n * d^2) complexity with O(1) sequential operations.",
+      "expected_sections": ["4 Why Self-Attention", "Table 1"],
       "relevant_passage_keywords": ["complexity", "O(n^2 * d)", "sequential operations", "maximum path length", "recurrent"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -65,7 +83,9 @@
       "difficulty": "medium",
       "question": "What optimizer and learning rate schedule were used to train the baseline Transformer?",
       "reference_answer": "The models were trained using the Adam optimizer with beta_1 = 0.9, beta_2 = 0.98, and epsilon = 10^-9. The learning rate was varied according to a formula that increases linearly for warmup_steps (4000) and decreases proportionally to the inverse square root of the step number.",
+      "expected_sections": ["5.3 Optimizer"],
       "relevant_passage_keywords": ["Adam", "beta_1", "warmup_steps", "learning rate", "inverse square root"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -74,7 +94,9 @@
       "difficulty": "medium",
       "question": "What regularization methods were applied during the training of the Transformer?",
       "reference_answer": "The authors applied Residual Dropout (rate P_drop = 0.1) to the output of each sub-layer before addition and normalization, as well as to sums of embeddings and positional encodings. They also used Label Smoothing with epsilon_ls = 0.1.",
+      "expected_sections": ["5.4 Regularization"],
       "relevant_passage_keywords": ["Residual Dropout", "Label Smoothing", "P_drop", "regularization"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -83,7 +105,9 @@
       "difficulty": "medium",
       "question": "Why is masking applied to the self-attention sub-layer in the decoder?",
       "reference_answer": "Masking combined with shifting output embeddings by one position ensures that predictions for position i can depend only on known outputs at positions less than i, preserving the auto-regressive property and preventing the decoder from attending to subsequent future positions.",
+      "expected_sections": ["3.1 Model Architecture", "decoder"],
       "relevant_passage_keywords": ["masking", "decoder", "auto-regressive", "future positions", "illegal connections"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     },
     {
@@ -92,7 +116,9 @@
       "difficulty": "hard",
       "question": "What were the hyperparameter differences between the Transformer base model and the Transformer big model?",
       "reference_answer": "The base model used N=6 layers, d_model=512, d_ff=2048, h=8 heads, d_k=d_v=64, with 65M parameters. The big model increased d_model to 1024, d_ff to 4096, h to 16 heads, d_k=d_v=64, with 213M parameters and 0.3 dropout.",
+      "expected_sections": ["Table 3", "Model Variations"],
       "relevant_passage_keywords": ["base", "big", "d_model", "d_ff", "parameters", "65M", "213M"],
+      "expected_filenames": ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf"],
       "expected_doc_ids": ["doc_transformer_baseline"]
     }
   ]

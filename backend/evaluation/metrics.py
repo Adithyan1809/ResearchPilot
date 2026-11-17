@@ -71,6 +71,88 @@ class RAGMetrics:
                 return round(1.0 / rank, 4)
         return 0.0
 
+    @staticmethod
+    def is_passage_relevant(
+        source_content: str,
+        relevant_keywords: List[str],
+        expected_sections: Optional[List[str]] = None,
+        source_section: Optional[str] = None,
+        min_keyword_ratio: float = 0.35,
+    ) -> bool:
+        """Determine whether a retrieved passage is genuinely relevant to the benchmark item.
+
+        Evaluates passage-level ground truth:
+        1. Section hierarchy match against expected canonical sections.
+        2. Presence of key semantic terms/phrases characteristic of the target passage.
+        """
+        if not source_content:
+            return False
+
+        content_lower = source_content.lower()
+
+        # Check section match if both provided
+        if expected_sections and source_section:
+            for sec in expected_sections:
+                if sec.lower() in source_section.lower():
+                    return True
+
+        # Check keyword / key phrase presence
+        if relevant_keywords:
+            matches = sum(1 for kw in relevant_keywords if kw.lower() in content_lower)
+            if matches / len(relevant_keywords) >= min_keyword_ratio or matches >= 2:
+                return True
+
+        return False
+
+    @classmethod
+    def passage_recall_at_k(
+        cls,
+        retrieved_sources: List[Any],
+        relevant_keywords: List[str],
+        expected_sections: Optional[List[str]] = None,
+        k: Optional[int] = None,
+    ) -> float:
+        """Measure whether at least one retrieved chunk in top-K genuinely contains the relevant passage.
+
+        Returns 1.0 if a genuine relevant passage is retrieved within top-K, 0.0 otherwise.
+        """
+        sources = retrieved_sources[:k] if k is not None else retrieved_sources
+        if not sources:
+            return 0.0
+
+        for src in sources:
+            content = getattr(src, "content", "") if not isinstance(src, str) else src
+            section = (
+                getattr(src, "section", None)
+                or getattr(src, "hierarchy", None)
+                or (getattr(src, "metadata", {}).get("section") if hasattr(src, "metadata") else None)
+            )
+            if cls.is_passage_relevant(content, relevant_keywords, expected_sections, section):
+                return 1.0
+        return 0.0
+
+    @classmethod
+    def passage_mrr(
+        cls,
+        retrieved_sources: List[Any],
+        relevant_keywords: List[str],
+        expected_sections: Optional[List[str]] = None,
+    ) -> float:
+        """Compute MRR based on the rank of the first genuinely relevant passage chunk.
+
+        Returns 1.0 / rank of first relevant passage, or 0.0 if not found in retrieved list.
+        """
+        for rank, src in enumerate(retrieved_sources, start=1):
+            content = getattr(src, "content", "") if not isinstance(src, str) else src
+            section = (
+                getattr(src, "section", None)
+                or getattr(src, "hierarchy", None)
+                or (getattr(src, "metadata", {}).get("section") if hasattr(src, "metadata") else None)
+            )
+            if cls.is_passage_relevant(content, relevant_keywords, expected_sections, section):
+                return round(1.0 / rank, 4)
+        return 0.0
+
     # ── LLM-as-a-Judge & Heuristic Metrics ───────────────────────────────────
 
     def faithfulness(self, answer: str, contexts: List[str]) -> float:

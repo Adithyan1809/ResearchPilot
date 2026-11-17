@@ -314,6 +314,8 @@ class RerankerService:
                     content=doc.content,
                     page_number=doc.page_number,
                     chunk_index=doc.chunk_index,
+                    chunk_id=doc.chunk_id,
+                    section=doc.section,
                     relevance_score=score,
                     doc_id=doc.doc_id,
                     filename=doc.filename,

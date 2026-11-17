@@ -65,6 +65,8 @@ class DocumentMetadata(BaseModel):
     filename: str = Field(..., description="Original filename of the uploaded PDF")
     page_number: int = Field(..., ge=1, description="1-indexed page number in the PDF")
     chunk_index: int = Field(..., ge=0, description="0-indexed chunk position within the page")
+    chunk_id: Optional[str] = Field(default=None, description="Globally unique chunk identifier")
+    section: Optional[str] = Field(default=None, description="Document section or breadcrumb hierarchy")
     total_pages: int = Field(..., ge=1, description="Total number of pages in the PDF")
     ingested_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -129,6 +131,8 @@ class SourceDocument(BaseModel):
     content: str = Field(..., description="Text content of the chunk")
     page_number: int = Field(..., ge=1, description="Page the chunk originates from")
     chunk_index: int = Field(..., ge=0, description="Chunk position index")
+    chunk_id: Optional[str] = Field(default=None, description="Globally unique chunk identifier (doc_id + page + index)")
+    section: Optional[str] = Field(default=None, description="Document section or breadcrumb hierarchy")
     relevance_score: float = Field(..., description="Relevance or RRF score")
     doc_id: str = Field(..., description="Parent document identifier")
     filename: str = Field(..., description="Original filename of the source document")

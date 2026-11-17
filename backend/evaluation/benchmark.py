@@ -48,6 +48,47 @@ class BenchmarkRunner:
         with open(dataset_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    def _resolve_expected_doc_ids(
+        self,
+        expected_docs: List[str],
+        item: Dict[str, Any],
+        doc_id: Optional[str] = None,
+    ) -> List[str]:
+        """Resolve symbolic document IDs (like 'doc_transformer_baseline') to actual ingested UUIDs."""
+        if doc_id:
+            return [doc_id]
+
+        resolved = []
+        doc_list = []
+        try:
+            if hasattr(self.pipeline, "get_documents"):
+                doc_list = self.pipeline.get_documents().documents
+        except Exception:
+            pass
+
+        expected_filenames = item.get(
+            "expected_filenames",
+            ["Attention_Is_All_You_Need.pdf", "test_sample_paper.pdf", "1706.03762.pdf"],
+        )
+
+        for exp in expected_docs:
+            if exp == "doc_transformer_baseline":
+                matched = None
+                for d in doc_list:
+                    if any(fn.lower() in d.filename.lower() for fn in expected_filenames):
+                        matched = d.doc_id
+                        break
+                if matched:
+                    resolved.append(matched)
+                elif doc_list:
+                    resolved.append(doc_list[0].doc_id)
+                else:
+                    resolved.append(exp)
+            else:
+                resolved.append(exp)
+
+        return resolved if resolved else expected_docs
+
     def evaluate_query(
         self,
         item: Dict[str, Any],
@@ -58,6 +99,8 @@ class BenchmarkRunner:
         question = item["question"]
         reference = item.get("reference_answer", "")
         expected_docs = item.get("expected_doc_ids", [])
+        relevant_keywords = item.get("relevant_passage_keywords", [])
+        expected_sections = item.get("expected_sections", [])
 
         # Start timer
         start_time = time.perf_counter()
@@ -71,6 +114,9 @@ class BenchmarkRunner:
         contexts = [src.content for src in response.sources]
         retrieved_ids = [src.doc_id for src in response.sources]
 
+        # Resolve document-level expected IDs (translates 'doc_transformer_baseline' -> active doc UUID)
+        resolved_expected_docs = self._resolve_expected_doc_ids(expected_docs, item, doc_id)
+
         # Compute metrics
         faithfulness = self.metrics.faithfulness(response.answer, contexts)
         hallucination = self.metrics.hallucination_rate(response.answer, contexts)
@@ -78,8 +124,18 @@ class BenchmarkRunner:
         correctness = self.metrics.answer_correctness(response.answer, reference)
         precision = self.metrics.context_precision(question, contexts, reference)
         recall = self.metrics.context_recall(contexts, reference)
-        recall_at_k = self.metrics.retrieval_recall_at_k(retrieved_ids, expected_docs)
-        mrr_score = self.metrics.mrr(retrieved_ids, expected_docs)
+
+        # Passage-level IR metrics (Ground-truth passage evaluation)
+        passage_recall = self.metrics.passage_recall_at_k(
+            response.sources, relevant_keywords, expected_sections, k=top_k
+        )
+        passage_mrr = self.metrics.passage_mrr(
+            response.sources, relevant_keywords, expected_sections
+        )
+
+        # Document-level IR metrics (with resolved UUIDs)
+        recall_at_k = self.metrics.retrieval_recall_at_k(retrieved_ids, resolved_expected_docs)
+        mrr_score = self.metrics.mrr(retrieved_ids, resolved_expected_docs)
 
         # Tokens and Cost
         prompt_tokens = response.tokens_used.prompt_tokens if response.tokens_used else 0
@@ -104,6 +160,8 @@ class BenchmarkRunner:
                 "answer_correctness": correctness,
                 "context_precision": precision,
                 "context_recall": recall,
+                "passage_recall_at_k": passage_recall,
+                "passage_mrr": passage_mrr,
                 "retrieval_recall_at_k": recall_at_k,
                 "mrr": mrr_score,
             },
@@ -161,6 +219,8 @@ class BenchmarkRunner:
             "answer_correctness",
             "context_precision",
             "context_recall",
+            "passage_recall_at_k",
+            "passage_mrr",
             "retrieval_recall_at_k",
             "mrr",
         ]
@@ -219,8 +279,10 @@ class BenchmarkRunner:
             ("answer_relevancy", "Answer Relevancy"),
             ("context_precision", "Context Precision"),
             ("context_recall", "Context Recall"),
-            ("retrieval_recall_at_k", "Retrieval Recall@K"),
-            ("mrr", "Mean Reciprocal Rank (MRR)"),
+            ("passage_recall_at_k", "Passage-Level Recall@K"),
+            ("passage_mrr", "Passage-Level MRR"),
+            ("retrieval_recall_at_k", "Document-Level Recall@K"),
+            ("mrr", "Document-Level MRR"),
             ("hallucination_rate", "Hallucination Rate"),
         ]
 

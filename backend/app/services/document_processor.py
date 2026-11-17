@@ -393,6 +393,7 @@ class DocumentProcessor:
         total_pages = len(pages)
         all_chunks: List[Document] = []
         section_stack: List[Tuple[int, str]] = []
+        global_chunk_idx = 0
 
         for page in pages:
             page_num = page["page_number"]
@@ -413,15 +414,18 @@ class DocumentProcessor:
                 cur_len = 0
 
                 def emit_chunk(body_text: str) -> None:
-                    nonlocal page_chunk_idx
+                    nonlocal page_chunk_idx, global_chunk_idx
                     chunk_content = f"{breadcrumb}\n\n{body_text}"
+                    chunk_id = f"{doc_id}_p{page_num}_c{page_chunk_idx}"
                     doc = Document(
                         page_content=chunk_content,
                         metadata={
+                            "chunk_id": chunk_id,
                             "doc_id": doc_id,
                             "filename": filename,
                             "page_number": page_num,
                             "chunk_index": page_chunk_idx,
+                            "global_chunk_index": global_chunk_idx,
                             "total_pages": total_pages,
                             "section": hierarchy,
                             "hierarchy": hierarchy,
@@ -432,6 +436,7 @@ class DocumentProcessor:
                     )
                     all_chunks.append(doc)
                     page_chunk_idx += 1
+                    global_chunk_idx += 1
 
                 for b_text, is_atomic in blocks:
                     if is_atomic:
