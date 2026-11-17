@@ -78,43 +78,74 @@ class RAGMetrics:
         expected_sections: Optional[List[str]] = None,
         source_section: Optional[str] = None,
         min_keyword_ratio: float = 0.35,
+        reference_answer: Optional[str] = None,
     ) -> bool:
         """Determine whether a retrieved passage is genuinely relevant to the benchmark item.
 
-        Evaluates passage-level ground truth:
-        1. Section hierarchy match against expected canonical sections.
-        2. Presence of key semantic terms/phrases characteristic of the target passage.
+        Avoids false positives where chunks from matching sections (e.g. Introduction)
+        lack answering content, or where generic words match unrelated chunks:
+        1. When expected_sections AND relevant_keywords are provided:
+           - If section matches: still requires keyword corroboration (at least 1 keyword
+             and meeting min_keyword_ratio or >= 2 matches). A chunk from 'Introduction'
+             with zero answering keywords will evaluate to False.
+           - If section does not match: requires stricter keyword density (>= 50% keywords
+             and >= 2 matches) to guard against passing mentions.
+        2. When ONLY expected_sections is provided:
+           - Evaluates to True if section matches.
+        3. When ONLY relevant_keywords is provided:
+           - Requires keyword ratio >= min_keyword_ratio and >= 2 matches (or >= 1 if only 1 keyword).
         """
         if not source_content:
             return False
 
         content_lower = source_content.lower()
 
-        # Check section match if both provided
+        section_matches = False
         if expected_sections and source_section:
-            for sec in expected_sections:
-                if sec.lower() in source_section.lower():
-                    return True
+            section_matches = any(sec.lower() in source_section.lower() for sec in expected_sections)
 
-        # Check keyword / key phrase presence
+        kw_matches = 0
+        kw_ratio = 0.0
         if relevant_keywords:
-            matches = sum(1 for kw in relevant_keywords if kw.lower() in content_lower)
-            if matches / len(relevant_keywords) >= min_keyword_ratio or matches >= 2:
-                return True
+            kw_matches = sum(1 for kw in relevant_keywords if kw.lower() in content_lower)
+            kw_ratio = kw_matches / len(relevant_keywords)
+
+        # Check for direct key numbers or entities from reference answer if available
+        ref_hit = False
+        if reference_answer:
+            ref_numbers = re.findall(r"\b\d+(?:\.\d+)?\b", reference_answer)
+            if ref_numbers:
+                ref_hit = any(num in content_lower for num in ref_numbers)
+
+        if expected_sections and relevant_keywords:
+            if section_matches:
+                # Require answering corroboration so non-answering chunks in section are rejected
+                return (kw_matches >= 1 and (kw_ratio >= min_keyword_ratio or kw_matches >= 2)) or ref_hit
+            else:
+                # Outside target section: require high keyword threshold
+                return (kw_ratio >= 0.50 and kw_matches >= 2) or (ref_hit and kw_matches >= 1)
+
+        if expected_sections and not relevant_keywords:
+            return section_matches
+
+        if relevant_keywords and not expected_sections:
+            min_hits = 1 if len(relevant_keywords) == 1 else 2
+            return kw_ratio >= min_keyword_ratio and kw_matches >= min_hits
 
         return False
 
     @classmethod
-    def passage_recall_at_k(
+    def passage_hit_at_k(
         cls,
         retrieved_sources: List[Any],
         relevant_keywords: List[str],
         expected_sections: Optional[List[str]] = None,
         k: Optional[int] = None,
+        reference_answer: Optional[str] = None,
     ) -> float:
-        """Measure whether at least one retrieved chunk in top-K genuinely contains the relevant passage.
+        """Measure whether AT LEAST ONE retrieved chunk in top-K genuinely contains the relevant passage.
 
-        Returns 1.0 if a genuine relevant passage is retrieved within top-K, 0.0 otherwise.
+        Standard Hit@K / Success@K (binary 0.0 or 1.0).
         """
         sources = retrieved_sources[:k] if k is not None else retrieved_sources
         if not sources:
@@ -127,9 +158,74 @@ class RAGMetrics:
                 or getattr(src, "hierarchy", None)
                 or (getattr(src, "metadata", {}).get("section") if hasattr(src, "metadata") else None)
             )
-            if cls.is_passage_relevant(content, relevant_keywords, expected_sections, section):
+            if cls.is_passage_relevant(
+                source_content=content,
+                relevant_keywords=relevant_keywords,
+                expected_sections=expected_sections,
+                source_section=section,
+                reference_answer=reference_answer,
+            ):
                 return 1.0
         return 0.0
+
+    @classmethod
+    def passage_recall_at_k(
+        cls,
+        retrieved_sources: List[Any],
+        relevant_keywords: List[str],
+        expected_sections: Optional[List[str]] = None,
+        total_relevant: int = 1,
+        k: Optional[int] = None,
+        reference_answer: Optional[str] = None,
+    ) -> float:
+        """Standard Information Retrieval Passage Recall@K.
+
+        Formula:
+            Recall@K = |retrieved_relevant_passages ∩ top_k| / total_relevant_passages
+
+        Parameters
+        ----------
+        retrieved_sources:
+            Retrieved chunk list.
+        relevant_keywords:
+            Characteristic keywords identifying answering passages.
+        expected_sections:
+            Canonical target sections.
+        total_relevant:
+            Total number of distinct relevant answering passages in the ground-truth corpus
+            (defaults to 1 if only a single focal chunk is expected).
+        k:
+            Top-K cutoff.
+        reference_answer:
+            Optional reference text for entity/number corroboration.
+        """
+        sources = retrieved_sources[:k] if k is not None else retrieved_sources
+        if not sources or total_relevant <= 0:
+            return 0.0
+
+        seen_keys = set()
+        for src in sources:
+            content = getattr(src, "content", "") if not isinstance(src, str) else src
+            section = (
+                getattr(src, "section", None)
+                or getattr(src, "hierarchy", None)
+                or (getattr(src, "metadata", {}).get("section") if hasattr(src, "metadata") else None)
+            )
+            chunk_id = (
+                getattr(src, "chunk_id", None)
+                or (getattr(src, "metadata", {}).get("chunk_id") if hasattr(src, "metadata") else None)
+                or f"{getattr(src, 'doc_id', '')}:{getattr(src, 'page_number', '')}:{getattr(src, 'chunk_index', '')}"
+            )
+            if cls.is_passage_relevant(
+                source_content=content,
+                relevant_keywords=relevant_keywords,
+                expected_sections=expected_sections,
+                source_section=section,
+                reference_answer=reference_answer,
+            ):
+                seen_keys.add(chunk_id)
+
+        return round(min(1.0, len(seen_keys) / total_relevant), 4)
 
     @classmethod
     def passage_mrr(
@@ -137,6 +233,7 @@ class RAGMetrics:
         retrieved_sources: List[Any],
         relevant_keywords: List[str],
         expected_sections: Optional[List[str]] = None,
+        reference_answer: Optional[str] = None,
     ) -> float:
         """Compute MRR based on the rank of the first genuinely relevant passage chunk.
 
@@ -149,7 +246,13 @@ class RAGMetrics:
                 or getattr(src, "hierarchy", None)
                 or (getattr(src, "metadata", {}).get("section") if hasattr(src, "metadata") else None)
             )
-            if cls.is_passage_relevant(content, relevant_keywords, expected_sections, section):
+            if cls.is_passage_relevant(
+                source_content=content,
+                relevant_keywords=relevant_keywords,
+                expected_sections=expected_sections,
+                source_section=section,
+                reference_answer=reference_answer,
+            ):
                 return round(1.0 / rank, 4)
         return 0.0
 
@@ -262,30 +365,88 @@ class RAGMetrics:
         except Exception:
             return self._heuristic_jaccard(answer, reference)
 
+    def _heuristic_context_precision(
+        self,
+        question: str,
+        contexts: List[str],
+        reference: str,
+    ) -> float:
+        """Compute standard ranking-weighted Context Precision without an LLM judge.
+
+        Formula:
+            Precision@k = (cumulative relevant chunks up to k) / k
+            Context Precision = sum(Precision@k * v_k) / total_relevant_chunks
+        """
+        if not contexts:
+            return 0.0
+
+        # Extract informative content terms (len >= 3) and key numbers
+        stopwords = {
+            "the", "and", "is", "in", "it", "to", "of", "for", "with", "on", "that", "this",
+            "are", "was", "as", "at", "by", "an", "be", "from", "or", "which", "what", "how",
+        }
+        ref_words = set(re.findall(r"\b[a-zA-Z0-9_\-]{3,}\b", reference.lower())) - stopwords
+        ref_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\b", reference))
+
+        if not ref_words and not ref_numbers:
+            return 0.0
+
+        verdicts = []
+        for ctx in contexts:
+            ctx_lower = ctx.lower()
+            word_matches = sum(1 for w in ref_words if w in ctx_lower)
+            number_matches = sum(1 for n in ref_numbers if n in ctx_lower)
+
+            is_rel = False
+            if ref_numbers and number_matches >= 1 and (word_matches >= 1 or len(ref_words) == 0):
+                is_rel = True
+            elif len(ref_words) > 0 and (word_matches / len(ref_words) >= 0.25 or word_matches >= 3):
+                is_rel = True
+
+            verdicts.append(1 if is_rel else 0)
+
+        total_relevant = sum(verdicts)
+        if total_relevant == 0:
+            return 0.0
+
+        cumulative_hits = 0
+        precision_sum = 0.0
+        for k, v in enumerate(verdicts, start=1):
+            if v == 1:
+                cumulative_hits += 1
+                precision_sum += cumulative_hits / k
+
+        return round(precision_sum / total_relevant, 4)
+
     def context_precision(
         self,
         question: str,
         contexts: List[str],
         reference: str,
     ) -> float:
-        """Proportion of retrieved contexts that contain information relevant to the question.
+        """Ranking-weighted signal-to-noise ratio in retrieved context (Context Precision@K).
 
-        Returns float between 0.0 and 1.0.
+        Formula:
+            Precision@k = (relevant chunks up to k) / k
+            Context Precision = sum(Precision@k * is_relevant(k)) / total_relevant_chunks
+
+        Uses LLM-as-a-judge when available; otherwise falls back to deterministic
+        ranking-weighted token/entity overlap. Never returns a fixed placeholder constant.
         """
         if not contexts:
             return 0.0
 
         if not self.llm:
-            return 0.5
+            return self._heuristic_context_precision(question, contexts, reference)
 
         prompt = ChatPromptTemplate.from_template(
-            "You are evaluating context retrieval quality.\n"
+            "You are evaluating context retrieval quality for a RAG system.\n"
             "Question: {question}\n"
             "Reference Answer: {reference}\n\n"
-            "Evaluate each of the following retrieved contexts. For each chunk, determine if it "
-            "contains relevant information to answer the question.\n\n"
+            "Evaluate each retrieved context chunk. For each chunk, determine if it contains "
+            "factual information directly useful to answer the question.\n\n"
             "Contexts:\n{contexts}\n\n"
-            "Output ONLY a JSON object: {{\"relevant_chunks\": <int>, \"total_chunks\": <int>, \"precision\": <float 0.0 to 1.0>}}"
+            "Output ONLY a JSON object: {{\"verdicts\": [<0 or 1 for each chunk in order>]}}"
         )
 
         try:
@@ -302,9 +463,26 @@ class RAGMetrics:
             )
             raw_text = res.content if hasattr(res, "content") else str(res)
             parsed = self._extract_json(raw_text)
-            return float(parsed.get("precision", 0.0))
+            verdicts = parsed.get("verdicts", [])
+
+            if not isinstance(verdicts, list) or len(verdicts) == 0:
+                return self._heuristic_context_precision(question, contexts, reference)
+
+            binary_verdicts = [1 if int(v) > 0 else 0 for v in verdicts[:len(contexts)]]
+            total_relevant = sum(binary_verdicts)
+            if total_relevant == 0:
+                return 0.0
+
+            cumulative_hits = 0
+            precision_sum = 0.0
+            for k, v in enumerate(binary_verdicts, start=1):
+                if v == 1:
+                    cumulative_hits += 1
+                    precision_sum += cumulative_hits / k
+
+            return round(precision_sum / total_relevant, 4)
         except Exception:
-            return 0.5
+            return self._heuristic_context_precision(question, contexts, reference)
 
     def context_recall(self, contexts: List[str], reference: str) -> float:
         """Measure how much of the ground truth reference answer is covered by retrieved context.

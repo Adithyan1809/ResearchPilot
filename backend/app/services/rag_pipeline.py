@@ -197,8 +197,9 @@ class RAGPipeline:
             # 1. Extract + chunk
             doc_id, chunks = self._doc_processor.process_pdf(file_path, filename)
 
-            # 2. Store in vector DB
+            # 2. Store in vector DB and invalidate lexical retriever cache
             count = self._vector_store.add_documents(chunks)
+            self._retriever.invalidate_bm25_cache()
 
             # 3. Determine total pages from chunk metadata
             total_pages = max(
@@ -520,6 +521,7 @@ class RAGPipeline:
         removed = self._remove_from_registry(doc_id)
 
         if removed or deleted_chunks:
+            self._retriever.invalidate_bm25_cache()
             logger.info(
                 "Document deleted: doc_id=%s (%d chunks removed)",
                 doc_id,

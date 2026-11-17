@@ -40,7 +40,16 @@ class BenchmarkRunner:
             Instance of `RAGMetrics`. If None, creates a default heuristic instance.
         """
         self.pipeline = pipeline
-        self.metrics = metrics_evaluator or RAGMetrics()
+        if metrics_evaluator is not None:
+            self.metrics = metrics_evaluator
+        else:
+            # Wire pipeline generator LLM if available, otherwise RAGMetrics with heuristic fallback
+            llm = None
+            if hasattr(pipeline, "generator") and hasattr(pipeline.generator, "llm"):
+                llm = pipeline.generator.llm
+            elif hasattr(pipeline, "_generator") and hasattr(pipeline._generator, "llm"):
+                llm = pipeline._generator.llm
+            self.metrics = RAGMetrics(llm=llm)
 
     @staticmethod
     def load_dataset(dataset_path: str) -> Dict[str, Any]:
@@ -80,9 +89,9 @@ class BenchmarkRunner:
                         break
                 if matched:
                     resolved.append(matched)
-                elif doc_list:
-                    resolved.append(doc_list[0].doc_id)
                 else:
+                    # Do not blindly guess or substitute doc_list[0].
+                    # Unmatched expected documents must not be falsely rewarded.
                     resolved.append(exp)
             else:
                 resolved.append(exp)
@@ -101,6 +110,7 @@ class BenchmarkRunner:
         expected_docs = item.get("expected_doc_ids", [])
         relevant_keywords = item.get("relevant_passage_keywords", [])
         expected_sections = item.get("expected_sections", [])
+        expected_passage_count = item.get("expected_passage_count", 1)
 
         # Start timer
         start_time = time.perf_counter()
@@ -126,11 +136,19 @@ class BenchmarkRunner:
         recall = self.metrics.context_recall(contexts, reference)
 
         # Passage-level IR metrics (Ground-truth passage evaluation)
+        passage_hit = self.metrics.passage_hit_at_k(
+            response.sources, relevant_keywords, expected_sections, k=top_k, reference_answer=reference
+        )
         passage_recall = self.metrics.passage_recall_at_k(
-            response.sources, relevant_keywords, expected_sections, k=top_k
+            response.sources,
+            relevant_keywords,
+            expected_sections,
+            total_relevant=expected_passage_count,
+            k=top_k,
+            reference_answer=reference,
         )
         passage_mrr = self.metrics.passage_mrr(
-            response.sources, relevant_keywords, expected_sections
+            response.sources, relevant_keywords, expected_sections, reference_answer=reference
         )
 
         # Document-level IR metrics (with resolved UUIDs)
@@ -160,6 +178,7 @@ class BenchmarkRunner:
                 "answer_correctness": correctness,
                 "context_precision": precision,
                 "context_recall": recall,
+                "passage_hit_at_k": passage_hit,
                 "passage_recall_at_k": passage_recall,
                 "passage_mrr": passage_mrr,
                 "retrieval_recall_at_k": recall_at_k,
@@ -219,6 +238,7 @@ class BenchmarkRunner:
             "answer_correctness",
             "context_precision",
             "context_recall",
+            "passage_hit_at_k",
             "passage_recall_at_k",
             "passage_mrr",
             "retrieval_recall_at_k",
@@ -279,6 +299,7 @@ class BenchmarkRunner:
             ("answer_relevancy", "Answer Relevancy"),
             ("context_precision", "Context Precision"),
             ("context_recall", "Context Recall"),
+            ("passage_hit_at_k", "Passage-Level Hit@K"),
             ("passage_recall_at_k", "Passage-Level Recall@K"),
             ("passage_mrr", "Passage-Level MRR"),
             ("retrieval_recall_at_k", "Document-Level Recall@K"),

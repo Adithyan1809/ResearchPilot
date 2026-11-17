@@ -48,6 +48,7 @@ class VectorStoreService:
             embedding_function=embedding_service.get_embeddings(),
             persist_directory=self._persist_dir,
         )
+        self._mutation_version: int = 1
         logger.info(
             "VectorStoreService initialised (dir=%s, collection=%s)",
             self._persist_dir,
@@ -81,7 +82,8 @@ class VectorStoreService:
 
         logger.info("Adding %d documents to ChromaDB", len(documents))
         self._store.add_documents(documents)
-        logger.info("Successfully added %d documents", len(documents))
+        self._mutation_version += 1
+        logger.info("Successfully added %d documents (version=%d)", len(documents), self._mutation_version)
         return len(documents)
 
     def delete_document(self, doc_id: str) -> int:
@@ -109,10 +111,15 @@ class VectorStoreService:
             return 0
 
         collection.delete(ids=ids_to_delete)
+        self._mutation_version += 1
         logger.info(
-            "Deleted %d chunks for doc_id=%s", len(ids_to_delete), doc_id
+            "Deleted %d chunks for doc_id=%s (version=%d)", len(ids_to_delete), doc_id, self._mutation_version
         )
         return len(ids_to_delete)
+
+    def get_version(self) -> int:
+        """Return the current mutation version counter for cache validation."""
+        return self._mutation_version
 
     # ── Read / search operations ─────────────────────────────────────────
 

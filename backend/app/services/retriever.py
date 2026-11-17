@@ -5,6 +5,7 @@ Reciprocal Rank Fusion (RRF) to eliminate dense-only retrieval blind spots
 for technical terms, equations, acronyms, and exact keywords.
 """
 
+import json
 import re
 import time
 from typing import Dict, List, Optional, Tuple
@@ -53,6 +54,13 @@ class RetrieverService:
         self._vector_store = vector_store
         self._settings = settings
         self.last_retrieval_latency_ms: float = 0.0
+        # In-memory BM25 index cache: filter_key -> (mutation_version, doc_count, all_docs, bm25_index)
+        self._bm25_cache: Dict[str, Tuple[int, int, List[Document], BM25Okapi]] = {}
+
+    def invalidate_bm25_cache(self) -> None:
+        """Explicitly clear the in-memory BM25 index cache when corpus documents change."""
+        logger.info("Invalidating in-memory BM25 index cache (%d entries cleared)", len(self._bm25_cache))
+        self._bm25_cache.clear()
 
     # ── Channel 1: Dense Semantic Vector Search ──────────────────────────────
 
@@ -90,29 +98,63 @@ class RetrieverService:
         k: int,
         filter_dict: Optional[Dict] = None,
     ) -> List[Tuple[Document, float]]:
-        """Retrieve top-K candidates using sparse BM25Okapi lexical matching."""
+        """Retrieve top-K candidates using sparse BM25Okapi lexical matching with index caching."""
         logger.debug("Executing BM25 lexical search (k=%d, filter=%s)", k, filter_dict)
-        all_docs = self._vector_store.get_all_documents(filter_dict=filter_dict)
-        if not all_docs:
-            logger.debug("No documents found for BM25 search")
-            return []
 
-        tokenized_corpus = [_tokenize(doc.page_content) for doc in all_docs]
+        # Cache key based on filter criteria
+        cache_key = json.dumps(filter_dict, sort_keys=True) if filter_dict else "__all__"
+
+        curr_ver = 0
+        if hasattr(self._vector_store, "get_version"):
+            try:
+                res = self._vector_store.get_version()
+                curr_ver = int(res) if isinstance(res, (int, float, str)) and str(res).isdigit() else 0
+            except Exception:
+                curr_ver = 0
+
+        curr_count = 0
+        if hasattr(self._vector_store, "get_document_count"):
+            try:
+                res = self._vector_store.get_document_count()
+                curr_count = int(res) if isinstance(res, (int, float, str)) and str(res).isdigit() else 0
+            except Exception:
+                curr_count = 0
+
+        cached = self._bm25_cache.get(cache_key)
+        if cached and cached[0] == curr_ver and cached[1] == curr_count:
+            all_docs, bm25 = cached[2], cached[3]
+            logger.debug("BM25 cache hit for key=%s (%d docs)", cache_key, len(all_docs))
+        else:
+            logger.debug("BM25 cache miss or invalidation for key=%s. Rebuilding index...", cache_key)
+            all_docs = self._vector_store.get_all_documents(filter_dict=filter_dict)
+            if not all_docs:
+                logger.debug("No documents found for BM25 search")
+                return []
+
+            tokenized_corpus = [_tokenize(doc.page_content) for doc in all_docs]
+            bm25 = BM25Okapi(tokenized_corpus)
+            self._bm25_cache[cache_key] = (curr_ver, curr_count, all_docs, bm25)
+            logger.debug("BM25 index built and cached for key=%s (%d docs)", cache_key, len(all_docs))
+
         tokenized_query = _tokenize(query)
 
         if not tokenized_query:
             logger.debug("Query produced 0 tokens for BM25 search")
             return []
 
-        bm25 = BM25Okapi(tokenized_corpus)
         scores = bm25.get_scores(tokenized_query)
 
-        # Pair documents with non-zero or positive BM25 scores
-        scored_docs: List[Tuple[Document, float]] = [
-            (doc, float(score))
-            for doc, score in zip(all_docs, scores)
-            if score > 0.0
-        ]
+        # Pair documents with positive BM25 scores (or term-overlap for tiny corpora where BM25Okapi IDF evaluates to 0.0)
+        scored_docs: List[Tuple[Document, float]] = []
+        for doc, score in zip(all_docs, scores):
+            if score > 0.0:
+                scored_docs.append((doc, float(score)))
+            elif score >= 0.0 and len(all_docs) <= 2:
+                # In BM25Okapi, IDF for N=2, n=1 is ln(1.5/1.5) = 0.0. Retain genuine term matches.
+                doc_tokens = set(_tokenize(doc.page_content))
+                overlap = sum(1 for t in tokenized_query if t in doc_tokens)
+                if overlap > 0:
+                    scored_docs.append((doc, float(overlap)))
 
         scored_docs.sort(key=lambda x: x[1], reverse=True)
         return scored_docs[:k]
